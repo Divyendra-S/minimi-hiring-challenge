@@ -55,6 +55,9 @@ export function createStore(db: Db) {
        ORDER BY createdAt DESC, seq DESC LIMIT ?
      ) ORDER BY createdAt, seq`,
   );
+  const selectFirst = db.prepare<[string], { title: string; createdAt: string; count: number }>(
+    `SELECT title, MIN(created_at) AS createdAt, COUNT(*) AS count FROM sessions WHERE user_id = ?`,
+  );
   const selectUsers = db.prepare<[], { userId: string }>(
     "SELECT DISTINCT user_id AS userId FROM sessions",
   );
@@ -87,6 +90,11 @@ export function createStore(db: Db) {
     addMessage,
     listSessions(userId: string, limit = 50): SessionSummary[] {
       return selectSessions.all(userId, limit);
+    },
+    /** How many sessions the user has, and the first of them. */
+    sessionStats(userId: string): { count: number; first?: { title: string; createdAt: string } } {
+      const row = selectFirst.get(userId);
+      return row?.count ? { count: row.count, first: row } : { count: 0 };
     },
     messages(userId: string, sessionId: string, limit = 500): StoredMessage[] {
       return selectMessages.all(sessionId, userId, limit).map(withSources);

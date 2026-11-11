@@ -10,7 +10,7 @@ const now = () => new Date("2026-11-11T09:30:00Z");
 test("saves the question and the cited answer, and streams start first and done last", async () => {
   const { store, memories } = stores();
   const { llm, requests } = scriptedLlm([
-    { text: "", toolCalls: [searchCall({ queries: ["neon pricing"] })] },
+    { text: "", toolCalls: [searchCall({ searches: [{ query: "neon pricing" }] })] },
     { text: "Neon Launch is $19/month [1].", toolCalls: [] },
   ]);
   const input = { userId: "u1", message: "Neon pricing?", timezone: "Asia/Kolkata" };
@@ -48,7 +48,7 @@ test("a question about a day with no conversations tells the model there were no
 test("a follow-up sees earlier turns, including their sources", async () => {
   const { store, memories } = stores();
   const first = scriptedLlm([
-    { text: "", toolCalls: [searchCall({ queries: ["neon"] })] },
+    { text: "", toolCalls: [searchCall({ searches: [{ query: "neon" }] })] },
     { text: "Neon is $19 [1].", toolCalls: [] },
   ]);
   const deps = { store, memories, search: fakeSearch, now };

@@ -8,7 +8,7 @@ const question = [{ role: "user" as const, content: "Compare Neon and Supabase p
 
 test("searches, numbers sources once per URL, then answers", async () => {
   const { llm, requests } = scriptedLlm([
-    { text: "", toolCalls: [searchCall({ queries: ["neon", "supabase"] })] },
+    { text: "", toolCalls: [searchCall({ searches: [{ query: "neon" }, { query: "supabase" }] })] },
     { text: "Neon is cheaper [1][3].", toolCalls: [] },
   ]);
   const { events } = await drain(runAgent({ llm, search: fakeSearch }, question));
@@ -45,7 +45,10 @@ test("one page under several addresses, or mirrored, gets a single number", asyn
     { title: "Neon docs", url: "https://neon.tech/docs", content: "Branching" },
   ];
   const { llm } = scriptedLlm([
-    { text: "", toolCalls: [searchCall({ queries: ["neon pricing", "neon"] })] },
+    {
+      text: "",
+      toolCalls: [searchCall({ searches: [{ query: "neon pricing" }, { query: "neon" }] })],
+    },
     { text: "Usage-based [1].", toolCalls: [] },
   ]);
   const { events } = await drain(runAgent({ llm, search }, question));
@@ -60,8 +63,8 @@ test("runs several tool calls from one reply together, with one numbering", asyn
     {
       text: "",
       toolCalls: [
-        searchCall({ queries: ["neon"] }, "a"),
-        searchCall({ queries: ["supabase"] }, "b"),
+        searchCall({ searches: [{ query: "neon" }] }, "a"),
+        searchCall({ searches: [{ query: "supabase" }] }, "b"),
       ],
     },
     { text: "Done.", toolCalls: [] },
@@ -82,7 +85,7 @@ test("runs several tool calls from one reply together, with one numbering", asyn
 
 test("text written before a search becomes its own paragraph", async () => {
   const { llm } = scriptedLlm([
-    { text: "Let me check.", toolCalls: [searchCall({ queries: ["neon"] })] },
+    { text: "Let me check.", toolCalls: [searchCall({ searches: [{ query: "neon" }] })] },
     { text: "Neon is $19 [1].", toolCalls: [] },
   ]);
   const { events } = await drain(runAgent({ llm, search: fakeSearch }, question));
@@ -101,7 +104,7 @@ test("answers without searching when the model doesn't call the tool", async () 
 
 test("rejects bad tool arguments without searching", async () => {
   const { llm, requests } = scriptedLlm([
-    { text: "", toolCalls: [searchCall({ queries: [] })] },
+    { text: "", toolCalls: [searchCall({ searches: [] })] },
     { text: "Sorry.", toolCalls: [] },
   ]);
   const { events } = await drain(runAgent({ llm, search: fakeSearch }, question));
@@ -109,12 +112,12 @@ test("rejects bad tool arguments without searching", async () => {
   assert.match(String(requests[1]?.messages.at(-1)?.content), /Invalid tool call/);
 });
 
-test("forces an answer after three search rounds", async () => {
-  const search = { text: "", toolCalls: [searchCall({ queries: ["again"] })] };
-  const { llm, requests } = scriptedLlm([search, search, search, search]);
+test("forces an answer after two search rounds", async () => {
+  const search = { text: "", toolCalls: [searchCall({ searches: [{ query: "again" }] })] };
+  const { llm, requests } = scriptedLlm([search, search, search]);
   await drain(runAgent({ llm, search: fakeSearch }, question));
-  assert.equal(requests.length, 4);
-  assert.equal(requests[3]?.toolChoice, "none");
+  assert.equal(requests.length, 3);
+  assert.equal(requests[2]?.toolChoice, "none");
 });
 
 test("a Stop during a search ends the turn instead of asking the model again", async () => {
@@ -124,7 +127,7 @@ test("a Stop during a search ends the turn instead of asking the model again", a
     return fakeSearch(query, options);
   };
   const { llm, requests } = scriptedLlm([
-    { text: "", toolCalls: [searchCall({ queries: ["neon"] })] },
+    { text: "", toolCalls: [searchCall({ searches: [{ query: "neon" }] })] },
   ]);
   await assert.rejects(drain(runAgent({ llm, search }, question, controller.signal)), {
     name: "AbortError",

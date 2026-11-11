@@ -26,6 +26,28 @@ test("the sample prompts resolve to the days they mean", () => {
   ]);
 });
 
+test("'the Monday before last' is the one a week before the latest", () => {
+  assert.deepEqual(labels("What did I ask the Monday before last?"), [
+    ["Monday before last", ["Mon, 2 Nov 2026"]],
+  ]);
+  assert.deepEqual(labels("and the tuesday before?"), [["tuesday before", ["Tue, 3 Nov 2026"]]]);
+});
+
+test("phrasings the date library misses: a time of day, counted weekdays, the weekend, 'the 3rd'", () => {
+  assert.deepEqual(labels("What did I ask on the morning of 3 November?"), [
+    ["on 3 November", ["Tue, 3 Nov 2026"]],
+  ]);
+  assert.deepEqual(labels("Two Mondays ago I asked about a CRM."), [
+    ["Two Mondays ago", ["Mon, 2 Nov 2026"]],
+  ]);
+  assert.deepEqual(labels("What did we plan over the weekend?"), [
+    ["the weekend", ["Sat, 7 Nov 2026 to Sun, 8 Nov 2026"]],
+  ]);
+  assert.deepEqual(labels("What did I ask on the 3rd?"), [["on the 3rd", ["Tue, 3 Nov 2026"]]]);
+  assert.deepEqual(labels("What did I ask on the 20th?"), [["on the 20th", ["Tue, 20 Oct 2026"]]]);
+  assert.deepEqual(labels("Is the 2nd cheapest one any good?"), []);
+});
+
 test("a day runs from midnight to midnight in the user's time zone", () => {
   const [range] = mentionedDates("on 3 November", wednesday, "Asia/Kolkata")[0]?.ranges ?? [];
   assert.equal(range?.from.toISOString(), "2026-11-02T18:30:00.000Z");
@@ -57,8 +79,8 @@ test("weekdays and dates without a year point to the past", () => {
 });
 
 test("weeks and months become ranges that stop at today", () => {
-  assert.deepEqual(labels("last week"), [["last week", ["Sun, 1 Nov 2026 to Sat, 7 Nov 2026"]]]);
-  assert.deepEqual(labels("this week"), [["this week", ["Sun, 8 Nov 2026 to Wed, 11 Nov 2026"]]]);
+  assert.deepEqual(labels("last week"), [["last week", ["Mon, 2 Nov 2026 to Sun, 8 Nov 2026"]]]);
+  assert.deepEqual(labels("this week"), [["this week", ["Mon, 9 Nov 2026 to Wed, 11 Nov 2026"]]]);
   assert.deepEqual(labels("in October"), [["October", ["Thu, 1 Oct 2026 to Sat, 31 Oct 2026"]]]);
 });
 

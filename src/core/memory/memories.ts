@@ -17,6 +17,9 @@ export type Memory = Omit<NewMemory, "entities" | "sourceUrl"> & {
   id: string;
   sourceUrl: string | null;
   observedAt: string;
+  /** The conversation it was learned in. */
+  sessionId: string;
+  sessionTitle: string;
 };
 /** The turn a memory came from: its answer and when it happened. */
 export type Turn = { sessionId: string; answerId: string; at: string };
@@ -32,8 +35,8 @@ export function normalize(text: string): string {
     .trim();
 }
 
-const MEMORY_COLUMNS =
-  "m.id, m.kind, m.text, m.topic, m.source_url AS sourceUrl, m.observed_at AS observedAt";
+const MEMORY_COLUMNS = `m.id, m.kind, m.text, m.topic, m.source_url AS sourceUrl,
+  m.observed_at AS observedAt, m.session_id AS sessionId, (SELECT title FROM sessions s WHERE s.id = m.session_id) AS sessionTitle`;
 
 /** Memories, the entities they mention, and their keyword index. Every query is scoped by user id. */
 export function createMemoryStore(db: Db) {
@@ -68,12 +71,16 @@ export function createMemoryStore(db: Db) {
   );
   // The newest N memories per entity. The ids arrive as a JSON array.
   const selectLinked = db.prepare<[string, string, number], Memory>(
-    `SELECT DISTINCT id, kind, text, topic, sourceUrl, observedAt FROM (
+    `SELECT DISTINCT id, kind, text, topic, sourceUrl, observedAt, sessionId, sessionTitle FROM (
        SELECT ${MEMORY_COLUMNS},
               ROW_NUMBER() OVER (PARTITION BY l.entity_id ORDER BY m.observed_at DESC) AS n
        FROM memory_entities l JOIN memories m ON m.id = l.memory_id
        WHERE m.user_id = ? AND l.entity_id IN (SELECT value FROM json_each(?))
-     ) WHERE n <= ?`,
+     ) WHERE n <= ? ORDER BY observedAt DESC`,
+  );
+  const selectEntitiesOf = db.prepare<[string], { id: number }>(
+    `SELECT DISTINCT entity_id AS id FROM memory_entities
+     WHERE memory_id IN (SELECT value FROM json_each(?))`,
   );
   const selectMatching = db.prepare<[string, string, number], Memory>(
     `SELECT ${MEMORY_COLUMNS} FROM memories_fts f JOIN memories m ON m.id = f.memory_id
@@ -88,6 +95,27 @@ export function createMemoryStore(db: Db) {
      WHERE m.user_id = ? AND m.session_id IN (SELECT value FROM json_each(?))
      ORDER BY m.observed_at DESC LIMIT ?`,
   );
+
+  const selectUnembedded = db.prepare<[string], { id: string; text: string; topic: string }>(
+    `SELECT m.id, m.text, m.topic FROM memories m WHERE m.user_id = ?
+       AND NOT EXISTS (SELECT 1 FROM memory_vectors v WHERE v.memory_id = m.id)`,
+  );
+  const insertVector = db.prepare(
+    "INSERT OR REPLACE INTO memory_vectors (memory_id, vector) VALUES (?, ?)",
+  );
+  const selectVectors = db.prepare<[string], { id: string; vector: Buffer }>(
+    `SELECT v.memory_id AS id, v.vector FROM memory_vectors v
+     JOIN memories m ON m.id = v.memory_id WHERE m.user_id = ?`,
+  );
+  const selectByIds = db.prepare<[string, string], Memory>(
+    `SELECT ${MEMORY_COLUMNS} FROM memories m
+     WHERE m.user_id = ? AND m.id IN (SELECT value FROM json_each(?))`,
+  );
+  const saveVectors = db.transaction((vectors: { id: string; vector: Float32Array }[]) => {
+    for (const { id, vector } of vectors) {
+      insertVector.run(id, Buffer.from(vector.buffer, vector.byteOffset, vector.byteLength));
+    }
+  });
 
   /** Saves a turn's memories and marks the turn as done, in one transaction. */
   const save = db.transaction((userId: string, turn: Turn, memories: NewMemory[]): number => {
@@ -135,6 +163,10 @@ export function createMemoryStore(db: Db) {
       if (entityIds.length === 0) return [];
       return selectLinked.all(userId, JSON.stringify(entityIds), perEntity);
     },
+    /** The entities these memories mention. */
+    entitiesOf(memoryIds: string[]): number[] {
+      return selectEntitiesOf.all(JSON.stringify(memoryIds)).map((row) => row.id);
+    },
     /** Keyword search (BM25, stemmed), best first. `query` uses FTS5 syntax. */
     matching(userId: string, query: string, limit: number): Memory[] {
       return selectMatching.all(query, userId, limit);
@@ -144,16 +176,49 @@ export function createMemoryStore(db: Db) {
       if (sessionIds.length === 0) return [];
       return selectFromSessions.all(userId, JSON.stringify(sessionIds), limit);
     },
+    /** Memories with no embedding yet. */
+    unembedded(userId: string): { id: string; text: string; topic: string }[] {
+      return selectUnembedded.all(userId);
+    },
+    saveVectors,
+    /**
+     * Search by meaning: the memories whose embeddings are closest to `query`, best first, at
+     * least `minSimilarity` (cosine) close. Compares against every vector the user has, which
+     * takes about a millisecond per thousand memories.
+     */
+    nearest(userId: string, query: Float32Array, limit: number, minSimilarity: number): Memory[] {
+      const best = selectVectors
+        .all(userId)
+        .map(({ id, vector }) => ({ id, similarity: dot(query, toFloats(vector)) }))
+        .filter((hit) => hit.similarity >= minSimilarity)
+        .sort((a, b) => b.similarity - a.similarity)
+        .slice(0, limit);
+      const found = selectByIds.all(userId, JSON.stringify(best.map((hit) => hit.id)));
+      const byId = new Map(found.map((memory) => [memory.id, memory]));
+      return best.flatMap((hit) => byId.get(hit.id) ?? []);
+    },
     textsOfSession(userId: string, sessionId: string): string[] {
       return selectOfSession.all(userId, sessionId).map((row) => row.text);
     },
     /** Forgets everything derived, so extraction can rebuild it from the log. */
     reset(): void {
       db.exec(
-        "DELETE FROM memory_entities; DELETE FROM memories_fts; DELETE FROM memories; DELETE FROM entities; DELETE FROM memorized;",
+        "DELETE FROM memory_vectors; DELETE FROM memory_entities; DELETE FROM memories_fts; DELETE FROM memories; DELETE FROM entities; DELETE FROM memorized;",
       );
     },
   };
+}
+
+/** A copy, since a Buffer's bytes aren't always aligned for floats. */
+function toFloats(bytes: Buffer): Float32Array {
+  return new Float32Array(new Uint8Array(bytes).buffer);
+}
+
+/** The cosine similarity of two unit-length vectors. */
+function dot(a: Float32Array, b: Float32Array): number {
+  let sum = 0;
+  for (let i = 0; i < a.length; i++) sum += (a[i] ?? 0) * (b[i] ?? 0);
+  return sum;
 }
 
 export type MemoryStore = ReturnType<typeof createMemoryStore>;

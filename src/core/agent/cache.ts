@@ -14,6 +14,7 @@ export function cachedSearch(search: Search, cache: SearchCache, now = Date.now)
       query.trim().replace(/\s+/g, " ").toLowerCase(),
       options.recency ?? null,
       options.fresh ?? false,
+      options.sites ?? [],
     ]);
     const entry = cache.get(key);
     if (entry && now() - entry.at < TTL_MS) return entry.hits;

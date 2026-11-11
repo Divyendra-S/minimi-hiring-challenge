@@ -1,6 +1,7 @@
+import { after } from "next/server";
 import { z } from "zod";
 import { seedDemo } from "@/core/memory/demo";
-import { getMemories, getStore } from "@/server/services";
+import { getMemories, getStore, index } from "@/server/services";
 import { getUserId } from "@/server/user";
 import { DemoRequest, isDemo } from "@/shared/dto";
 
@@ -17,5 +18,6 @@ export async function POST(request: Request): Promise<Response> {
     return Response.json({ error: "The demo history is already loaded." }, { status: 409 });
   }
   seedDemo({ store, memories: getMemories() }, userId, new Date(), parsed.data.timezone);
+  after(() => index(userId));
   return new Response(null, { status: 204 });
 }

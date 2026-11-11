@@ -10,19 +10,56 @@ const DAY_MS = 86_400_000;
 // Spans are computed in wall-clock time: midnight of a local day, written as if it were UTC.
 type Span = { from: number; days: number };
 
+const WEEKDAYS = ["sun", "mon", "tue", "wed", "thu", "fri", "sat"];
+const COUNTS: Record<string, number> = { two: 2, three: 3, four: 4 };
+
 /** Finds dates like "on Monday", "last Tuesday" or "3 November" that point at past days. */
 export function mentionedDates(text: string, now: Date, timeZone: string): DateMention[] {
   const wallNow = wallClock(now, timeZone);
   const today = startOfDay(wallNow);
-  return chrono.parse(text, { instant: new Date(wallNow), timezone: 0 }).flatMap((result) => {
-    const ranges = spansFor(result, today)
+  // chrono reads "the morning of 3 November" as this morning; the day is what matters here.
+  const plain = text.replace(/\b(morning|afternoon|evening|night) of\b/gi, "on");
+  const parsed = chrono
+    .parse(plain, { instant: new Date(wallNow), timezone: 0 })
+    .filter((result) => !/weekend/i.test(result.text)) // chrono means the coming one
+    .map((result) => {
+      // "the Monday before last", "and the Tuesday before?": the words after the match move it
+      // a week back.
+      const after = plain.slice(result.index + result.text.length).match(/^\s+before( last)?\b/i);
+      const phrase = `${result.text}${after?.[0] ?? ""}`;
+      return { phrase, spans: spansFor(result, today, after !== null) };
+    });
+  return [...parsed, ...otherSpans(plain, today)].flatMap(({ phrase, spans }) => {
+    const ranges = spans
       .filter((span) => span.from <= today)
       .map((span) => toRange(span, today, timeZone));
-    return ranges.length ? [{ phrase: result.text, ranges }] : [];
+    return ranges.length ? [{ phrase, ranges }] : [];
   });
 }
 
-function spansFor(result: chrono.ParsedResult, today: number): Span[] {
+/** Phrases chrono doesn't know: "two Mondays ago", "last weekend", "on the 3rd". */
+function otherSpans(text: string, today: number): { phrase: string; spans: Span[] }[] {
+  const found: { phrase: string; spans: Span[] }[] = [];
+  const counted = /\b(two|three|four|[2-4]) (sun|mon|tue|wed|thu|fri|sat)[a-z]*days ago\b/gi;
+  for (const [phrase, count = "", name = ""] of text.matchAll(counted)) {
+    const weeks = COUNTS[count.toLowerCase()] ?? Number(count);
+    const latest = today - daysBack(today, WEEKDAYS.indexOf(name.toLowerCase())) * DAY_MS;
+    found.push({ phrase, spans: [one(latest - (weeks - 1) * 7 * DAY_MS)] });
+  }
+  for (const [phrase] of text.matchAll(/\b(last |the )?weekend\b/gi)) {
+    // The latest Saturday and Sunday.
+    found.push({ phrase, spans: [{ from: today - daysBack(today, 6) * DAY_MS, days: 2 }] });
+  }
+  // Only after "on": "the 2nd cheapest" is not a date.
+  for (const [phrase, number] of text.matchAll(/\bon the (\d{1,2})(?:st|nd|rd|th)\b(?! of)/gi)) {
+    const date = new Date(today);
+    const month = date.getUTCMonth() - (Number(number) > date.getUTCDate() ? 1 : 0);
+    found.push({ phrase, spans: [one(Date.UTC(date.getUTCFullYear(), month, Number(number)))] });
+  }
+  return found;
+}
+
+function spansFor(result: chrono.ParsedResult, today: number, beforeLast: boolean): Span[] {
   const phrase = result.text.toLowerCase();
   const { start } = result;
   const day = startOfDay(start.date().getTime());
@@ -32,6 +69,7 @@ function spansFor(result: chrono.ParsedResult, today: number): Span[] {
   if (weekday !== null && start.isCertain("weekday") && !start.isCertain("day")) {
     // "Monday" means the latest one before today. "Last Tuesday" can also mean the week before.
     const latest = today - daysBack(today, weekday) * DAY_MS;
+    if (beforeLast) return [one(latest - 7 * DAY_MS)];
     return phrase.startsWith("last") ? [one(latest), one(latest - 7 * DAY_MS)] : [one(latest)];
   }
   if (result.end) {
@@ -39,8 +77,10 @@ function spansFor(result: chrono.ParsedResult, today: number): Span[] {
     if (end > day) return [{ from: day, days: (end - day) / DAY_MS + 1 }];
   }
   if (phrase.includes("week")) {
-    // "last week", "two weeks ago": the Sunday-to-Saturday week around that day.
-    return [{ from: day - new Date(day).getUTCDay() * DAY_MS, days: 7 }];
+    // "last week", "two weeks ago": the Monday-to-Sunday week (ISO 8601) around that day.
+    // chrono starts "this week" on Sunday, so that one is counted from today.
+    const within = phrase.startsWith("this") ? today : day;
+    return [{ from: within - ((new Date(within).getUTCDay() + 6) % 7) * DAY_MS, days: 7 }];
   }
   const date = new Date(day);
   const month = date.getUTCMonth();

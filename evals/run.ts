@@ -1,6 +1,7 @@
 // npm run eval                     Free and offline (CI runs it). Every case goes through chat()
 //                                  with a stand-in model, and the context the real model would
 //                                  get is checked.
+// npm run eval -- --show n2        Prints the prompt, context included, that a case gives the model.
 // npm run eval -- --live a1 c1 e1  Also runs the named cases with the real model and search,
 //                                  checks the answers, and reports latency and cost. This spends
 //                                  money, so it runs only the cases you name, at most --max-calls
@@ -8,12 +9,14 @@
 import "../scripts/load-env";
 import { parseArgs } from "node:util";
 import { openDb } from "@/adapters/db";
+import { localEmbedder } from "@/adapters/embedder";
 import { keyUsage, type Llm, openRouter } from "@/adapters/llm";
 import { type Search, tavily } from "@/adapters/tavily";
 import { loadConfig } from "@/config";
 import { cachedSearch } from "@/core/agent/cache";
 import { type ChatDeps, chat } from "@/core/chat";
-import { seedDemo } from "@/core/memory/demo";
+import { BRIEF_CHATS, seedDemo } from "@/core/memory/demo";
+import { indexMemories } from "@/core/memory/embed";
 import { createMemoryStore } from "@/core/memory/memories";
 import { createStore, type Store } from "@/core/memory/store";
 import { openRouterAccount } from "@/server/services";
@@ -26,25 +29,42 @@ const TIME_ZONE = "America/New_York";
 // OpenRouter's usage counter lags the requests by a few seconds.
 const USAGE_SETTLE_MS = 10_000;
 
-type Run = { events: ChatEvent[]; prompt: string; searches: { fresh: boolean }[]; error?: string };
+// The real embedding model: it runs locally, so this is still free and needs no key.
+const embedder = localEmbedder();
+
+// The stand-in model answers at once, so offline timings are our own code: recall and storage.
+const stub: Llm = async function* () {
+  yield { type: "delta", text: "(offline)" };
+  return { text: "(offline)", toolCalls: [] };
+};
+
+type Run = {
+  events: ChatEvent[];
+  prompt: string;
+  searches: { fresh: boolean; ms: number }[];
+  /** How long each model call took to finish. */
+  modelMs: number[];
+  error?: string;
+};
 
 const args = parseArgs({
   allowPositionals: true,
-  options: { live: { type: "boolean" }, "max-calls": { type: "string", default: "8" } },
+  options: {
+    live: { type: "boolean" },
+    show: { type: "boolean" },
+    "max-calls": { type: "string", default: "8" },
+  },
 });
 
-await offline();
+if (args.values.show) await show(args.positionals);
+else await offline();
 if (args.values.live) await live(args.positionals, Number(args.values["max-calls"]));
 
 async function offline(): Promise<void> {
+  await embedder.embed(["warm-up"]); // so the first cases don't run while the model is loading
   console.log(`Context checks, offline: ${CASES.length} cases\n`);
   const results = [];
   for (const c of CASES) {
-    // The stand-in model answers at once, so the timings are our own code: recall and storage.
-    const stub: Llm = async function* () {
-      yield { type: "delta", text: "(offline)" };
-      return { text: "(offline)", toolCalls: [] };
-    };
     const run = await runCase(c, stub, async () => []);
     const context = run.prompt.match(/<context>\n([\s\S]*)\n<\/context>/)?.[1] ?? "";
     results.push({ c, run, failures: run.error ? [run.error] : contextFailures(c, context) });
@@ -53,6 +73,15 @@ async function offline(): Promise<void> {
   const ms = results.map(({ run }) => doneEvent(run)?.timings.totalMs ?? 0);
   console.log(`\nTime in our code per turn: p50 ${pct(ms, 50)} ms, p90 ${pct(ms, 90)} ms`);
   printFailures(results);
+}
+
+/** Prints the context the model would get for the named cases. */
+async function show(ids: string[]): Promise<void> {
+  for (const id of ids) {
+    const c = CASES.find((c) => c.id === id) ?? fail(`No case "${id}".`);
+    const run = await runCase(c, stub, async () => []);
+    console.log(`--- ${c.id}: ${c.message}\n${run.prompt}\n`);
+  }
 }
 
 async function live(ids: string[], maxCalls: number): Promise<void> {
@@ -79,7 +108,8 @@ async function live(ids: string[], maxCalls: number): Promise<void> {
     console.log(
       `${c.id}  ${failures.length ? "FAIL" : "pass"}  ${searched}, first token ` +
         `${seconds(timings?.firstTokenMs)}, total ${seconds(timings?.totalMs)}, ` +
-        `${calls - callsBefore} model calls\n    Q: ${c.message}\n    A: ${indent(answerOf(run))}`,
+        `${calls - callsBefore} model calls\n    Model calls took ${run.modelMs.map(seconds).join(", ")}; ` +
+        `the slowest search ${seconds(Math.max(0, ...run.searches.map((s) => s.ms)))}${searchesOf(run)}\n    Q: ${c.message}\n    A: ${indent(answerOf(run))}`,
     );
     for (const failure of failures) console.log(`    ✗ ${failure}`);
     results.push({ c, run, failures });
@@ -107,22 +137,35 @@ async function live(ids: string[], maxCalls: number): Promise<void> {
 async function runCase(c: EvalCase, llm: Llm, search: Search): Promise<Run> {
   const db = openDb(":memory:");
   const store = createStore(db);
-  const run: Run = { events: [], prompt: "", searches: [] };
+  const run: Run = { events: [], prompt: "", searches: [], modelMs: [] };
   const deps: ChatDeps = {
     store,
     memories: createMemoryStore(db),
+    embedder,
     now: () => NOW,
     // Records the prompt of the first call: the one that carries the context.
-    llm: (request) => {
+    llm: async function* (request) {
       run.prompt ||= String(request.messages.at(-1)?.content ?? "");
-      return llm(request);
+      const started = performance.now();
+      try {
+        return yield* llm(request);
+      } finally {
+        run.modelMs.push(Math.round(performance.now() - started));
+      }
     },
-    search: (query, options) => {
-      run.searches.push({ fresh: options.fresh === true });
-      return search(query, options);
+    search: async (query, options) => {
+      const started = performance.now();
+      try {
+        return await search(query, options);
+      } finally {
+        const ms = Math.round(performance.now() - started);
+        run.searches.push({ fresh: options.fresh === true, ms });
+      }
     },
   };
-  if (c.history === "demo") seedDemo(deps, USER, NOW, TIME_ZONE);
+  if (c.history === "demo") seedDemo(deps, USER, NOW, TIME_ZONE, BRIEF_CHATS);
+  if (c.history === "long") seedDemo(deps, USER, NOW, TIME_ZONE);
+  await indexMemories({ memories: deps.memories, embedder }, USER);
   const sessionId = c.earlier && earlierChat(store, c.earlier);
   try {
     const input = { userId: USER, sessionId, message: c.message, timezone: TIME_ZONE };
@@ -156,16 +199,27 @@ function contextFailures(c: EvalCase, context: string): string[] {
 }
 
 function answerFailures(c: EvalCase, run: Run): string[] {
-  const { search, fresh, has = [] } = c.answer;
+  const { search, official = [], has = [], lacks = [] } = c.answer;
   const answer = answerOf(run);
   const searched = run.searches.length > 0;
+  const cited = citedUrls(run, answer);
   return [
     search === true && !searched && "didn't search",
     search === false && searched && "searched when it needn't",
-    fresh && !run.searches.some((s) => s.fresh) && "didn't ask for fresh pages",
+    ...official
+      .filter((domain) => !cited.some((url) => new URL(url).hostname.endsWith(domain)))
+      .map((domain) => `cites no page of ${domain}`),
     searched && !/\[\d+\]/.test(answer) && "searched but cites nothing",
     ...has.filter((pattern) => !pattern.test(answer)).map((pattern) => `answer lacks ${pattern}`),
+    ...lacks.filter((pattern) => pattern.test(answer)).map((pattern) => `answer has ${pattern}`),
   ].filter((failure) => typeof failure === "string");
+}
+
+/** The pages behind the [n] marks in the answer. */
+function citedUrls(run: Run, answer: string): string[] {
+  const sources = run.events.findLast((event) => event.type === "sources")?.sources ?? [];
+  const numbers = new Set([...answer.matchAll(/\[(\d+)\]/g)].map((match) => Number(match[1])));
+  return sources.filter((s) => numbers.has(s.n) && URL.canParse(s.url)).map((s) => s.url);
 }
 
 type Result = { c: EvalCase; failures: string[] };
@@ -174,10 +228,10 @@ function printGroups(results: Result[]): void {
   for (const [letter, name] of Object.entries(GROUPS)) {
     const group = results.filter(({ c }) => c.id.startsWith(letter));
     const passed = group.filter((r) => r.failures.length === 0).length;
-    console.log(`  ${letter}  ${name.padEnd(30)} ${passed}/${group.length}`);
+    console.log(`  ${letter}  ${name.padEnd(32)} ${passed}/${group.length}`);
   }
   const passed = results.filter((r) => r.failures.length === 0).length;
-  console.log(`     ${"All".padEnd(30)} ${passed}/${results.length}`);
+  console.log(`     ${"All".padEnd(32)} ${passed}/${results.length}`);
 }
 
 function printFailures(results: Result[]): void {
@@ -191,6 +245,14 @@ function printFailures(results: Result[]): void {
 
 function doneEvent(run: Run) {
   return run.events.find((event) => event.type === "done");
+}
+
+/** One line per search round: what the model asked for. */
+function searchesOf(run: Run): string {
+  return run.events
+    .flatMap((event) => (event.type === "searching" ? [event.queries.join(" | ")] : []))
+    .map((round) => `\n    Searched: ${round}`)
+    .join("");
 }
 
 function answerOf(run: Run): string {

@@ -33,7 +33,7 @@ export async function* chat(
       ? input.sessionId
       : store.createSession(userId, titleFrom(input.message), now.toISOString());
   const history = store.messages(userId, sessionId, HISTORY_MESSAGES);
-  const context = buildContext(deps, {
+  const context = await buildContext(deps, {
     userId,
     sessionId,
     message: input.message,

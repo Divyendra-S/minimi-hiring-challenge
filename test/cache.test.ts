@@ -51,5 +51,5 @@ test("doesn't cache failures, and drops expired entries", async () => {
   await cached("a", {});
   clock = TEN_MINUTES;
   await cached("b", {});
-  assert.deepEqual([...cache.keys()], [JSON.stringify(["b", null, false])]);
+  assert.deepEqual([...cache.keys()], [JSON.stringify(["b", null, false, []])]);
 });

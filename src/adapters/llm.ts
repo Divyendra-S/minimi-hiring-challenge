@@ -32,6 +32,8 @@ export type OpenRouterOptions = { apiKey: string; model: string; usageCap?: Usag
 
 const BASE_URL = "https://openrouter.ai/api/v1";
 // Low reasoning effort keeps replies fast: time-to-first-token for chat, cost for extraction.
+// Measured on three questions: "none", OpenAI's priority tier and routing by latency all landed
+// within the run-to-run noise of "low" (1.4 to 2.5 s per call), so none of them is used.
 const REASONING_EFFORT = "low";
 // OpenRouter reports usage a few seconds late, so the cap stops early by about one turn's calls.
 const CAP_MARGIN_USD = 0.003;

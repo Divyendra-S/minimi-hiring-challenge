@@ -57,6 +57,12 @@ CREATE VIRTUAL TABLE IF NOT EXISTS memories_fts USING fts5 (
   memory_id UNINDEXED, text, topic, tokenize = 'porter unicode61'
 );
 
+-- For finding a memory by meaning: its embedding, as raw 32-bit floats.
+CREATE TABLE IF NOT EXISTS memory_vectors (
+  memory_id TEXT PRIMARY KEY REFERENCES memories (id),
+  vector BLOB NOT NULL
+);
+
 -- Answers whose turn has been through extraction, whether or not it produced memories.
 CREATE TABLE IF NOT EXISTS memorized (
   message_id TEXT PRIMARY KEY REFERENCES messages (id)

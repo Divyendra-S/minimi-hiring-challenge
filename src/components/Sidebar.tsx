@@ -37,7 +37,7 @@ export function Sidebar({ selectedId, onSelect }: Props) {
       </ul>
       {sessions.data && !sessions.data.some(isDemo) && (
         <div className="m-3 space-y-2 text-xs text-neutral-500">
-          <p>To try recall, add three demo chats from the past two weeks.</p>
+          <p>To try recall, add 31 demo chats from the past eight weeks.</p>
           <button
             type="button"
             onClick={() => loadDemo.mutate()}
