@@ -122,6 +122,10 @@ export function createMemoryStore(db: Db) {
      WHERE m.user_id = ? AND m.subject IN (SELECT value FROM json_each(?))
      ORDER BY m.observed_at`,
   );
+  const selectChangedSubjects = db.prepare<[string, number], { subject: string }>(
+    `SELECT subject FROM memories WHERE user_id = ? AND subject IS NOT NULL
+     GROUP BY subject HAVING COUNT(*) > 1 ORDER BY MAX(observed_at) DESC LIMIT ?`,
+  );
   const selectSubjects = db.prepare<[string, number], { subject: string }>(
     `SELECT subject FROM memories WHERE user_id = ? AND subject IS NOT NULL
      GROUP BY subject ORDER BY MAX(observed_at) DESC LIMIT ?`,
@@ -218,6 +222,10 @@ export function createMemoryStore(db: Db) {
       return selectHistory.all(userId, JSON.stringify(subjects));
     },
     /** The subjects in use, most recently used first. */
+    /** Subjects that have had more than one value, the latest change first. */
+    changedSubjects(userId: string, limit: number): string[] {
+      return selectChangedSubjects.all(userId, limit).map((row) => row.subject);
+    },
     subjects(userId: string, limit: number): string[] {
       return selectSubjects.all(userId, limit).map((row) => row.subject);
     },

@@ -28,6 +28,8 @@ const MIN_SIMILARITY = 0.25;
 const MEMORIES_PER_ENTITY = 5;
 const MAX_MEMORIES = 60;
 const OPTIONS_OF_DECISIONS = 30;
+const CHANGED_SUBJECTS = 20;
+const ASKS_WHAT_CHANGED = /\b(chang(e|ed|es|ing)|went (up|down)|increased?|dropped)\b/i;
 // Seen live: asked "how many conversations about CRMs?", the model wrote "three" first, then
 // listed four. Told in the system prompt to list first, it still led with the number. A note
 // right before the question is followed.
@@ -110,7 +112,7 @@ export async function buildContext(deps: ContextDeps, input: ContextInput): Prom
     `Now: ${formatNow(input.now, input.timeZone)}`,
     ...dates.lines,
     memories.text,
-    ...aboutSection(deps.memories, input, memories.shown),
+    ...aboutSection(deps.memories, input),
     ...turnsSection(deps.store, input, dates.sessionIds, memories),
     sessionsSection(deps.store, input),
     ...dates.notes,
@@ -248,15 +250,17 @@ function turnsSection(
   return [["Earlier answers in full (some may be off topic):", ...blocks].join("\n")];
 }
 
-/** The user's facts, preferences and decisions that the memories above don't already show. */
-function aboutSection(memories: MemoryStore, input: ContextInput, shown: Set<string>): string[] {
+/**
+ * The user's facts, preferences and decisions. Each list is complete, also where a line repeats
+ * a memory shown above. Seen live: with the two oldest decisions shown only above, asked for
+ * "the very first decision I made", the model gave the oldest line of this list, the third.
+ */
+function aboutSection(memories: MemoryStore, input: ContextInput): string[] {
   const all = memories.about(input.userId, ABOUT_USER);
   // A fact that a newer one replaced (a team of 20, now 25) is left out.
   const subjects = [...new Set(all.flatMap((m) => m.subject ?? []))];
   const current = new Map(memories.historyOf(input.userId, subjects).map((m) => [m.subject, m.id]));
-  const rest = all.filter(
-    (m) => !shown.has(m.id) && (!m.subject || current.get(m.subject) === m.id),
-  );
+  const rest = all.filter((m) => !m.subject || current.get(m.subject) === m.id);
   if (rest.length === 0) return [];
   // One list per kind. Seen live: in a single list, asked for "my most recent decision", the
   // model gave the newest line, which was a fact.
@@ -309,7 +313,15 @@ function memoriesSection(
   // A price, a team size or a choice can be replaced by a newer memory about the same subject.
   // Every value the subject has had is shown, and code says which one stands: the model is not
   // left to work that out from the dates.
-  const history = memories.historyOf(userId, [...new Set(best.flatMap((m) => m.subject ?? []))]);
+  // Asked what changed, every subject that has had two values is shown, found or not. Seen
+  // live: "list every price that changed" found Pipedrive's two prices and not Neon's, whose
+  // memory doesn't use the word "price".
+  const changed = ASKS_WHAT_CHANGED.test(message)
+    ? memories.changedSubjects(userId, CHANGED_SUBJECTS)
+    : [];
+  const history = memories.historyOf(userId, [
+    ...new Set([...best.flatMap((m) => m.subject ?? []), ...changed]),
+  ]);
   const current = new Map(history.map((m) => [m.subject, m]));
   const replacedBy = (m: Memory) => {
     const newer = m.subject ? current.get(m.subject) : undefined;

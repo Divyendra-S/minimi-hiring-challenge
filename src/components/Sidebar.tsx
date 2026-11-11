@@ -1,4 +1,4 @@
-import { useLoadDemo, useSessions } from "@/client/queries";
+import { useImportChats, useImportStatus, useLoadDemo, useSessions } from "@/client/queries";
 import { DEMO_TITLE, isDemo, type SessionSummary } from "@/shared/dto";
 import { DatabaseIcon, MarkIcon, PlusIcon } from "./icons";
 
@@ -13,6 +13,8 @@ type Props = {
 export function Sidebar({ selectedId, onSelect, open, onClose }: Props) {
   const sessions = useSessions();
   const loadDemo = useLoadDemo();
+  const importChats = useImportChats();
+  const pending = useImportStatus().data?.pending ?? 0;
   return (
     <>
       {open && (
@@ -104,6 +106,32 @@ export function Sidebar({ selectedId, onSelect, open, onClose }: Props) {
             </button>
           </div>
         )}
+        <div className="mx-3 mb-3 px-1">
+          <label className="block cursor-pointer text-[12px] font-medium text-text-secondary transition-colors duration-150 hover:text-text-primary">
+            {importChats.isPending ? "Importing…" : "Import chats from a JSON file"}
+            <input
+              type="file"
+              accept="application/json,.json"
+              className="sr-only"
+              disabled={importChats.isPending}
+              onChange={(event) => {
+                const file = event.target.files?.[0];
+                if (file) importChats.mutate(file);
+                event.target.value = "";
+              }}
+            />
+          </label>
+          {/* Recall by date works at once; prices and decisions are found once this reaches 0. */}
+          <p className="mt-1 text-[11px] leading-snug whitespace-pre-wrap text-text-tertiary">
+            {importChats.isError
+              ? importChats.error.message
+              : pending > 0
+                ? `Extracting memories: ${pending} ${pending === 1 ? "turn" : "turns"} left.`
+                : importChats.data
+                  ? `Imported ${importChats.data.chats} chats. Memories are ready.`
+                  : "Format: examples/chats.json"}
+          </p>
+        </div>
       </nav>
     </>
   );

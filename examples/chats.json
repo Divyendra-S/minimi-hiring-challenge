@@ -1,0 +1,176 @@
+[
+  {
+    "title": "Laptop for programming",
+    "date": "2026-10-28T19:40:00Z",
+    "messages": [
+      {
+        "role": "user",
+        "content": "Which laptop should I get for programming, under $1,500?"
+      },
+      {
+        "role": "assistant",
+        "content": "Two good picks under $1,500:\n\n- **MacBook Air 13-inch (M4, 16 GB)**: from $999, with the best battery life in its class [1]. It is silent, since it has no fan, and fast enough for web, mobile and most backend work.\n- **Framework Laptop 13**: from $1,049, and repairable, if you want Linux [2]. You can replace the memory, storage, battery and ports yourself, and upgrade the mainboard in a few years.\n\nGet at least 16 GB of memory either way. An editor, a browser with documentation open, a database and a couple of containers will use most of it.\n\nHow to choose:\n\n- Pick the MacBook Air if you build for iOS or macOS, want all-day battery, or simply want something that works with no tinkering.\n- Pick the Framework if you want to run Linux natively, care about repairing and upgrading, or need more than two ports.\n\nThings that would change the advice: heavy Docker use or local machine-learning models favour more memory, and a lot of video or game work favours a machine with a fan and a stronger graphics chip. Tell me what you mostly build and I can be more specific.",
+        "sources": [
+          {
+            "title": "MacBook Air - Apple",
+            "url": "https://www.apple.com/macbook-air/"
+          },
+          {
+            "title": "Framework Laptop 13",
+            "url": "https://frame.work/laptop13"
+          }
+        ]
+      },
+      {
+        "role": "user",
+        "content": "I'll go with the MacBook Air."
+      },
+      {
+        "role": "assistant",
+        "content": "Good choice for programming. It handles an editor, a browser, a local database and a dev server without slowing down, and you can work a full day away from a charger.\n\nIf you run Docker or several VMs, 24 GB of memory is worth the upgrade. Memory can't be added later on a MacBook, so this is the one decision to get right at purchase.\n\nA simple guide:\n\n- **16 GB**: web and app development, scripting, a few containers.\n- **24 GB**: several containers at once, Android emulators, or local language models.\n\nOther choices at checkout:\n\n- **Screen size**: the 13-inch is lighter; the 15-inch gives more room for side-by-side windows. Many developers use an external monitor at a desk anyway.\n- **Charger**: the higher-wattage one charges faster and costs little.\n- **AppleCare**: worth considering if the laptop travels a lot.\n\nIf you're a student or a teacher, check Apple's education price, and look at Apple's refurbished store, where the same model is often about 15% cheaper with the same warranty."
+      },
+      {
+        "role": "user",
+        "content": "Is 256 GB of storage enough?"
+      },
+      {
+        "role": "assistant",
+        "content": "For code alone, yes. With Docker images and Xcode, 512 GB is safer; that model is $1,199 [1].\n\nWhere the space goes on a developer's laptop:\n\n- macOS and the built-in apps: about 30 to 40 GB.\n- Xcode with a couple of simulators: 40 GB or more.\n- Docker images and volumes: 20 to 60 GB, and they grow quietly.\n- Node modules, build caches and package caches across projects: 10 to 30 GB.\n- Your own files, photos and anything else.\n\nOn 256 GB you can be near full within a year if you use Xcode or Docker, and a nearly full disk slows the machine down.\n\nLike memory, storage can't be upgraded later. If the $200 matters, there is a workable middle path: buy 256 GB and keep large files on a fast external SSD, which costs well under $100 for 1 TB. But for a laptop you'll keep for four or five years, 512 GB built in is the less annoying choice. Given the options, I would put money into memory first and storage second.",
+        "sources": [
+          {
+            "title": "MacBook Air - Apple",
+            "url": "https://www.apple.com/macbook-air/"
+          }
+        ]
+      },
+      {
+        "role": "user",
+        "content": "Can I trade in my 2019 MacBook Pro?"
+      },
+      {
+        "role": "assistant",
+        "content": "Yes. Apple usually gives $200 to $350 for one, depending on its condition.\n\nHow it works:\n\n- Enter the serial number on Apple's trade-in page to get an estimate, then choose trade-in at checkout or bring the laptop to a store.\n- Online, the value comes back as a refund after they inspect it; in a store, it comes off the price on the spot.\n- If it doesn't power on or the screen is damaged, the value drops sharply, sometimes to recycling only.\n\nBefore you decide, compare with selling it yourself:\n\n- A 2019 MacBook Pro in good condition often sells privately for more than Apple offers, sometimes by $100 to $200, in exchange for the effort of listing and meeting a buyer.\n- Resale sites that buy directly sit in between.\n\nBefore handing it over, whichever route you take: back it up, sign out of iCloud and Find My, and erase it. The 16-inch 2019 model is worth noticeably more than the 13-inch, so check which one you have before accepting a quote."
+      }
+    ]
+  },
+  {
+    "title": "Postgres hosting for a side project",
+    "date": "2026-11-03T15:15:00Z",
+    "messages": [
+      {
+        "role": "user",
+        "content": "I need managed Postgres for a small side project. How do Neon, Supabase and Railway compare on price?"
+      },
+      {
+        "role": "assistant",
+        "content": "All three have a cheap way in:\n\n- **Neon**: a free plan with 0.5 GB of storage; the paid Launch plan starts at $19/month [1].\n- **Supabase**: a free plan with a 500 MB database; Pro is $25/month per organization and includes $10 of compute credits [2].\n- **Railway**: the Hobby plan is $5/month, which includes $5 of usage [3].\n\nFor a small project, start on Neon's or Supabase's free plan. Of the paid plans, Railway's is the cheapest.\n\nHow they differ beyond price:\n\n- **Neon** is Postgres only, and serverless: compute scales down to zero when idle, and you can branch a database like a git branch, which is handy for preview deployments.\n- **Supabase** is a whole backend around Postgres: authentication, file storage, auto-generated APIs and realtime subscriptions. Good value if you would use those; more than you need if you only want a database.\n- **Railway** is a general hosting platform. Postgres runs as an ordinary container next to your app, billed by the resources it uses.\n\nFor a database on its own behind a Next.js app, Neon's free plan is the simplest start. Check each provider's limits on connections and on inactivity before you commit.",
+        "sources": [
+          {
+            "title": "Neon pricing",
+            "url": "https://neon.com/pricing"
+          },
+          {
+            "title": "Supabase pricing",
+            "url": "https://supabase.com/pricing"
+          },
+          {
+            "title": "Railway pricing",
+            "url": "https://railway.com/pricing"
+          }
+        ]
+      },
+      {
+        "role": "user",
+        "content": "Which of them scale to zero when nothing is using the database?"
+      },
+      {
+        "role": "assistant",
+        "content": "Neon does, and wakes in under a second. Supabase pauses free projects after a week without use. Railway bills for whatever runs.\n\nIn more detail:\n\n- **Neon**: after about five minutes with no connections, compute suspends and you stop paying for it. The next query wakes it, typically in a few hundred milliseconds. On paid plans you can change or turn off the suspend delay.\n- **Supabase**: paid projects run all the time. Free projects are paused after about a week of inactivity, and you have to restore them by hand from the dashboard, which takes a few minutes. That is a pause, not scale to zero.\n- **Railway**: the database is a container that runs continuously, so it uses memory and CPU even when idle. A small Postgres typically stays within the $5 of included usage.\n\nWhat it means for a side project with occasional traffic: Neon costs the least when idle, at the price of a short delay on the first request after a quiet spell. If that first slow request bothers you, a scheduled ping keeps it awake, though that also uses compute hours."
+      },
+      {
+        "role": "user",
+        "content": "I want to keep it under $10 a month."
+      },
+      {
+        "role": "assistant",
+        "content": "Then use a free plan, or Railway's Hobby plan.\n\nHow each option fits under $10:\n\n- **Neon free**: $0. 0.5 GB of storage and scale to zero. The best fit if the data stays small.\n- **Supabase free**: $0. A 500 MB database, but the project pauses after a week without use, which is awkward for something you want always available.\n- **Railway Hobby**: $5 a month including $5 of usage. A small always-on Postgres usually stays within that, so the bill is typically $5.\n\nWhat does not fit: Neon Launch at $19 and Supabase Pro at $25 are both over your limit.\n\nSo the practical choice is:\n\n- Neon's free plan while the database is under 0.5 GB and you can accept the short wake-up delay.\n- Railway Hobby if you want it always on, or expect to pass 0.5 GB soon.\n\nOn Railway, set a usage limit in the dashboard so a runaway query or a traffic spike can't take the bill past the $10 you have in mind."
+      },
+      {
+        "role": "user",
+        "content": "Do all three have a region in the eastern US?"
+      },
+      {
+        "role": "assistant",
+        "content": "Yes, all three.\n\n- **Neon**: US East in Virginia and in Ohio, on AWS.\n- **Supabase**: US East in North Virginia, also on AWS.\n- **Railway**: a US East region in Virginia.\n\nWhat matters more than the provider is matching the region to where your app runs. Vercel's default function region is in Washington, D.C., which is a few milliseconds from all of these. If the database is in Virginia and the functions are in, say, Europe, every query crosses the Atlantic and each page gets noticeably slower.\n\nSo:\n\n1. Choose the database region first.\n2. Set the Vercel function region to the nearest one.\n3. If your users are spread around the world, keep the database and functions together in one place and let the CDN handle the static content.\n\nThe region is chosen when you create the database and is not simple to change afterwards; moving means a dump and restore. It is worth getting right on day one."
+      }
+    ]
+  },
+  {
+    "title": "CRM shortlist for a 20-person team",
+    "date": "2026-11-09T15:30:00Z",
+    "messages": [
+      {
+        "role": "user",
+        "content": "We're a 20-person sales team. Shortlist five CRM tools under $50 per user per month."
+      },
+      {
+        "role": "assistant",
+        "content": "Five that fit, billed annually, cheapest first:\n\n1. **Freshsales Growth**: $9 per user per month [1].\n2. **HubSpot Sales Hub Starter**: $15 per seat per month [2].\n3. **Zoho CRM Professional**: $23 per user per month [3].\n4. **Salesforce Starter Suite**: $25 per user per month [4].\n5. **Pipedrive Growth**: $34 per user per month [5].\n\nFor 20 people, that's $2,160, $3,600, $5,520, $6,000 and $8,160 a year.\n\nWhat each is best at:\n\n- **Freshsales**: the lowest price, with a built-in phone and email sequences. A good all-rounder.\n- **HubSpot**: the easiest to learn, with a free marketing and service layer around it. The price rises steeply on the higher tiers.\n- **Zoho**: the most features for the money, and very customisable. The interface takes longer to learn.\n- **Salesforce**: the industry standard. Starter is simple, and you can grow into the full platform without migrating.\n- **Pipedrive**: the clearest pipeline view, built around what reps do each day.\n\nAll five are under your $50 limit with room to spare. To narrow it down, it helps to know which email and calendar you use, whether you need phone calling built in, and how much reporting your managers want.",
+        "sources": [
+          {
+            "title": "Freshsales pricing",
+            "url": "https://www.freshworks.com/crm/pricing/"
+          },
+          {
+            "title": "HubSpot Sales Hub pricing",
+            "url": "https://www.hubspot.com/pricing/sales"
+          },
+          {
+            "title": "Zoho CRM pricing",
+            "url": "https://www.zoho.com/crm/zohocrm-pricing.html"
+          },
+          {
+            "title": "Salesforce Sales Cloud pricing",
+            "url": "https://www.salesforce.com/sales/pricing/"
+          },
+          {
+            "title": "Pipedrive pricing",
+            "url": "https://www.pipedrive.com/en/pricing"
+          }
+        ]
+      },
+      {
+        "role": "user",
+        "content": "Which of them works best with Gmail?"
+      },
+      {
+        "role": "assistant",
+        "content": "All five sync with Gmail. Pipedrive's two-way sync and email tracking are the most complete at this price; HubSpot's Gmail extension is the quickest to set up.\n\nHow each one handles it:\n\n- **Pipedrive**: full two-way sync, so emails sent from Gmail or from Pipedrive show up in both. Open and click tracking, templates and scheduling are included on this plan, and a Gmail add-on shows the deal next to the message.\n- **HubSpot**: a Chrome extension that logs and tracks email from inside Gmail with one checkbox. Reps can be using it within minutes. The Starter plan includes templates and tracking, with limits on some features.\n- **Zoho**: a Gmail add-on and two-way sync that work well but take more configuration.\n- **Freshsales**: two-way sync and a Chrome extension, with tracking and templates.\n- **Salesforce**: a Gmail integration that logs emails and shows records in a side panel. It is solid, though some of its features need higher editions.\n\nAll five also sync Google Calendar, so meetings appear on the contact. For a team that lives in Gmail, the two to look at first are Pipedrive and HubSpot."
+      },
+      {
+        "role": "user",
+        "content": "Do any of them have a minimum number of seats or an onboarding fee on these plans?"
+      },
+      {
+        "role": "assistant",
+        "content": "No. None of the five has a seat minimum or a required onboarding fee on the plan listed.\n\nFor each:\n\n- **Freshsales Growth**: buy any number of seats, with no setup fee.\n- **HubSpot Sales Hub Starter**: sold per seat with no minimum. The required onboarding fees apply to the Professional and Enterprise tiers only.\n- **Zoho CRM Professional**: no minimum and no setup fee.\n- **Salesforce Starter Suite**: no minimum, and you can buy it online without talking to sales. It is capped at a maximum number of users, which a team of 20 can run into as it grows, so check the current cap.\n- **Pipedrive Growth**: no minimum and no onboarding fee.\n\nCosts that can still appear:\n\n- Annual billing means paying the year up front; monthly billing costs more per seat.\n- Add-ons such as extra automation, phone credits or document signing.\n- Paid help with data migration, which is optional.\n\nSo the annual figures for 20 seats are close to what you would actually pay, before tax. Ask each vendor to confirm in writing when you get a quote."
+      },
+      {
+        "role": "user",
+        "content": "Which two would you trial first?"
+      },
+      {
+        "role": "assistant",
+        "content": "HubSpot, for the quickest setup, and Pipedrive, for the best pipeline view.\n\nWhy these two:\n\n- They are the strongest for a team that works in Gmail, which you said matters.\n- They represent two different approaches. HubSpot is a broad platform with marketing and service tools around the CRM. Pipedrive does one thing, managing deals, and does it very well.\n- Trying both shows you which approach your reps prefer, and that tells you more than a feature list.\n\nWhat each trial will tell you:\n\n- **HubSpot**: how fast reps get going, and whether the Starter plan's limits on automation and reporting are a problem for you.\n- **Pipedrive**: whether the pipeline view makes reps update deals more reliably, and whether its reports are enough for your managers.\n\nWhy not the other three first:\n\n- **Freshsales** is the cheapest and worth a look if these two disappoint.\n- **Zoho** needs more setup time than a short trial allows.\n- **Salesforce** makes most sense if you expect to need heavy customisation later.\n\nBoth offer free trials with no card."
+      },
+      {
+        "role": "user",
+        "content": "OK, we'll trial HubSpot and Pipedrive for two weeks."
+      },
+      {
+        "role": "assistant",
+        "content": "Noted: a two-week trial of HubSpot and Pipedrive. Have the same five reps use both, so the comparison is fair.\n\nHow to run it:\n\n1. **Pick the five**: a mix of account executives and SDRs, including one sceptic.\n2. **Load real data**: import the same 50 to 100 open deals and their contacts into both.\n3. **Connect Gmail and the calendar** on day one in both tools.\n4. **Split the time**: one week in each, or half the group starting in each tool and swapping at the midpoint.\n5. **Use them for real work**: log calls, move deals, send emails from the CRM.\n\nWhat to score at the end, from 1 to 5:\n\n- How long it took to feel comfortable.\n- How easy it is to update a deal after a call.\n- The Gmail integration.\n- The reports a manager needs for the weekly pipeline review.\n- The mobile app.\n\nAlso write down everything that needed a workaround. At the end, get a written quote for 20 seats from both, including any add-ons the trial showed you need, so you compare the real prices and not the list prices."
+      }
+    ]
+  }
+]

@@ -30,6 +30,9 @@ export type ChatRequest = z.infer<typeof ChatRequest>;
 /** Body of POST /api/demo: the demo chats are dated in the user's time zone. */
 export const DemoRequest = z.object({ timezone: TimeZone });
 
+/** Response of GET /api/import. */
+export type ImportStatus = { pending: number };
+
 /** Demo chats are titled "Demo: ...", so they're never mistaken for real ones. */
 export const DEMO_TITLE = "Demo: ";
 

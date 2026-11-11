@@ -216,7 +216,8 @@ test("finds a memory by meaning when no word matches, unless it is too far off",
   assert.ok(!matched.includes("support team"), context);
   // What recall did not match still rides along, as who the user is.
   assert.ok(about.includes("Thu, 8 Oct 2026: The user's support team has 6 people."), context);
-  assert.ok(!about.includes("vegetarian"), context); // not repeated
+  // The lists are complete: a matched memory is in its list too.
+  assert.ok(about.includes("The user is vegetarian."), context);
 });
 
 test("about the user: a fact that a newer one replaced is left out", async () => {

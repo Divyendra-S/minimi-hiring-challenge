@@ -1,9 +1,10 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import type { Health, SessionSummary, StoredMessage } from "@/shared/dto";
+import type { Health, ImportStatus, SessionSummary, StoredMessage } from "@/shared/dto";
 
 export const queryKeys = {
   health: ["health"] as const,
   sessions: ["sessions"] as const,
+  importStatus: ["import"] as const,
   messages: (sessionId: string) => ["messages", sessionId] as const,
 };
 
@@ -41,6 +42,37 @@ export function useLoadDemo() {
       if (!res.ok) throw new Error(`/api/demo returned ${res.status}`);
     },
     onSuccess: () => queryClient.invalidateQueries({ queryKey: queryKeys.sessions }),
+  });
+}
+
+/** Uploads a JSON file of past chats. The server's message says what is wrong with a bad file. */
+export function useImportChats() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (file: File) => {
+      const res = await fetch("/api/import", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: await file.text(),
+      });
+      const body = await res.json().catch(() => null);
+      if (!res.ok) throw new Error(body?.error ?? `/api/import returned ${res.status}`);
+      return body as { chats: number; turns: number };
+    },
+    onSuccess: () =>
+      Promise.all([
+        queryClient.invalidateQueries({ queryKey: queryKeys.sessions }),
+        queryClient.invalidateQueries({ queryKey: queryKeys.importStatus }),
+      ]),
+  });
+}
+
+/** Turns still waiting for memory extraction. Polled only while there are some. */
+export function useImportStatus() {
+  return useQuery({
+    queryKey: queryKeys.importStatus,
+    queryFn: () => getJson<ImportStatus>("/api/import"),
+    refetchInterval: (query) => (query.state.data?.pending ? 2000 : false),
   });
 }
 
