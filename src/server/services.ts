@@ -1,7 +1,7 @@
 import { getDb } from "@/adapters/db";
-import { openRouter, openRouterStructured } from "@/adapters/llm";
+import { type OpenRouterOptions, openRouter, openRouterStructured } from "@/adapters/llm";
 import { tavily } from "@/adapters/tavily";
-import { loadConfig } from "@/config";
+import { type Config, loadConfig } from "@/config";
 import { cachedSearch, type SearchCache } from "@/core/agent/cache";
 import type { ChatDeps } from "@/core/chat";
 import { type ExtractDeps, memorize } from "@/core/memory/extract";
@@ -23,7 +23,7 @@ export function getStore(): Store {
   return globals.agentStore;
 }
 
-function getMemories(): MemoryStore {
+export function getMemories(): MemoryStore {
   globals.memoryStore ??= createMemoryStore(getDb());
   return globals.memoryStore;
 }
@@ -35,7 +35,7 @@ export function chatDeps(): ChatDeps {
   return {
     store: getStore(),
     memories: getMemories(),
-    llm: openRouter(config.OPENROUTER_API_KEY, config.CHAT_MODEL),
+    llm: openRouter({ ...openRouterAccount(config), model: config.CHAT_MODEL }),
     search: cachedSearch(tavily(config.TAVILY_API_KEY), globals.searchCache),
     now: () => new Date(),
   };
@@ -46,7 +46,15 @@ function extractDeps(): ExtractDeps {
   return {
     store: getStore(),
     memories: getMemories(),
-    llm: openRouterStructured(config.OPENROUTER_API_KEY, config.MEMORY_MODEL),
+    llm: openRouterStructured({ ...openRouterAccount(config), model: config.MEMORY_MODEL }),
+  };
+}
+
+export function openRouterAccount(config: Config): Omit<OpenRouterOptions, "model"> {
+  const { OPENROUTER_KEY_USAGE_CAP_USD: capUsd, OPENROUTER_KEY_USAGE_START_USD: startUsd } = config;
+  return {
+    apiKey: config.OPENROUTER_API_KEY,
+    usageCap: capUsd === undefined || startUsd === undefined ? undefined : { capUsd, startUsd },
   };
 }
 

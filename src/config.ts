@@ -1,11 +1,21 @@
 import { z } from "zod";
 
-const EnvSchema = z.object({
-  OPENROUTER_API_KEY: z.string().min(1),
-  TAVILY_API_KEY: z.string().min(1),
-  CHAT_MODEL: z.string().min(1).default("openai/gpt-6-luna"),
-  MEMORY_MODEL: z.string().min(1).default("openai/gpt-6-luna"),
-});
+const EnvSchema = z
+  .object({
+    OPENROUTER_API_KEY: z.string().min(1),
+    TAVILY_API_KEY: z.string().min(1),
+    CHAT_MODEL: z.string().min(1).default("openai/gpt-6-luna"),
+    MEMORY_MODEL: z.string().min(1).default("openai/gpt-6-luna"),
+    // Optional spending cap: dollars the app may spend, counted from the key's usage at the start.
+    OPENROUTER_KEY_USAGE_CAP_USD: z.coerce.number().positive().optional(),
+    OPENROUTER_KEY_USAGE_START_USD: z.coerce.number().nonnegative().optional(),
+  })
+  .refine(
+    (env) =>
+      env.OPENROUTER_KEY_USAGE_CAP_USD === undefined ||
+      env.OPENROUTER_KEY_USAGE_START_USD !== undefined,
+    { path: ["OPENROUTER_KEY_USAGE_START_USD"], message: "Required with a spending cap" },
+  );
 
 export type Config = z.infer<typeof EnvSchema>;
 

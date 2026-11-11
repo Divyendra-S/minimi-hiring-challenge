@@ -1,4 +1,4 @@
-import { useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import type { Health, SessionSummary, StoredMessage } from "@/shared/dto";
 
 export const queryKeys = {
@@ -26,6 +26,21 @@ export function useSessions() {
   return useQuery({
     queryKey: queryKeys.sessions,
     queryFn: () => getJson<SessionSummary[]>("/api/sessions"),
+  });
+}
+
+export function useLoadDemo() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async () => {
+      const res = await fetch("/api/demo", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ timezone: Intl.DateTimeFormat().resolvedOptions().timeZone }),
+      });
+      if (!res.ok) throw new Error(`/api/demo returned ${res.status}`);
+    },
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: queryKeys.sessions }),
   });
 }
 

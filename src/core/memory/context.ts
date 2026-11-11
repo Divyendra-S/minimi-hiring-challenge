@@ -6,6 +6,8 @@ import type { LoggedMessage, Store } from "./store";
 const MESSAGES_PER_RANGE = 40;
 const QUESTION_CHARS = 500;
 const ANSWER_CHARS = 400;
+// Memories of the conversations a date points to: those answers are quoted cut short.
+const MEMORIES_FROM_DATES = 16;
 const KEYWORD_MATCHES = 8;
 const MEMORIES_PER_ENTITY = 5;
 const MAX_MEMORIES = 24;
@@ -35,23 +37,25 @@ export type ContextInput = {
 
 /**
  * What the agent knows beyond this session, built in code on every turn with no model call:
- * conversations on the days the message mentions, saved memories that match it, and the list
- * of recent conversations. An empty section says so, so the model can tell "nothing happened"
- * apart from "not shown".
+ * conversations on the days the message mentions, saved memories from them and memories that
+ * match the message, and the list of recent conversations. An empty section says so, so the
+ * model can tell "nothing happened" apart from "not shown".
  */
 export function buildContext(deps: ContextDeps, input: ContextInput): string {
+  const dates = datesSection(deps.store, input);
   return [
     `Now: ${formatNow(input.now, input.timeZone)}`,
-    ...datesSection(deps.store, input),
-    memoriesSection(deps.memories, input),
+    ...dates.lines,
+    memoriesSection(deps.memories, input, dates.sessionIds),
     sessionsSection(deps.store, input),
   ].join("\n\n");
 }
 
-function datesSection(store: Store, input: ContextInput): string[] {
+function datesSection(store: Store, input: ContextInput) {
   const { userId, sessionId, message, now, timeZone } = input;
   const seen = new Set<string>();
-  return mentionedDates(message, now, timeZone).flatMap(({ phrase, ranges }) => {
+  const sessionIds = new Set<string>();
+  const lines = mentionedDates(message, now, timeZone).flatMap(({ phrase, ranges }) => {
     const labels = ranges.map((range) => range.label);
     const meaning =
       ranges.length === 1
@@ -61,10 +65,12 @@ function datesSection(store: Store, input: ContextInput): string[] {
       if (seen.has(range.label)) return []; // "on Monday ... since Monday"
       seen.add(range.label);
       const messages = store.messagesBetween(userId, range, sessionId, MESSAGES_PER_RANGE);
+      for (const m of messages) sessionIds.add(m.sessionId);
       return [conversationsOn(range, messages, timeZone)];
     });
     return [meaning, ...days];
   });
+  return { lines, sessionIds: [...sessionIds] };
 }
 
 function conversationsOn(range: DayRange, messages: LoggedMessage[], timeZone: string): string {
@@ -85,11 +91,12 @@ function conversationsOn(range: DayRange, messages: LoggedMessage[], timeZone: s
   return [`${heading}:`, ...blocks].join("\n");
 }
 
-function memoriesSection(memories: MemoryStore, input: ContextInput): string {
+function memoriesSection(memories: MemoryStore, input: ContextInput, sessionIds: string[]) {
   const { userId, message, recent, timeZone } = input;
   const query = keywordQuery(message);
   const entityIds = mentionedEntities(memories, userId, [message, ...recent.map((m) => m.content)]);
   const found = uniqueById([
+    ...memories.fromSessions(userId, sessionIds, MEMORIES_FROM_DATES),
     ...(query ? memories.matching(userId, query, KEYWORD_MATCHES) : []),
     ...memories.linkedTo(userId, entityIds, MEMORIES_PER_ENTITY),
   ])

@@ -19,6 +19,7 @@ Memory:
 - The <context> block before the user's message is everything you know beyond this conversation: the current time, conversations on the dates the message mentions, saved memories that match it, and a list of recent conversations.
 - If the user refers to a conversation, answer or fact that isn't there, say you have no record of it and offer to help now. Never invent past conversations or answers.
 - If a date could mean more than one day, say which one you used and why.
+- If nothing is on the day the user named, but a conversation or memory on the same topic is from another day, use it and say which day it was from.
 - To check whether an earlier answer still holds, compare what was said then, with its date, against a fresh search. For prices and plans, search with fresh: true.
 - Use saved memories only when they are relevant, and don't recite them unprompted.`;
 

@@ -15,3 +15,18 @@ test("loadConfig fills in the default models", () => {
   assert.equal(config.CHAT_MODEL, "openai/gpt-6-luna");
   assert.equal(config.MEMORY_MODEL, "openai/gpt-6-luna");
 });
+
+test("a spending cap needs the usage it starts from", () => {
+  const keys = { OPENROUTER_API_KEY: "or-key", TAVILY_API_KEY: "tv-key" };
+  assert.throws(
+    () => loadConfig({ ...keys, OPENROUTER_KEY_USAGE_CAP_USD: "0.02" }),
+    (error) =>
+      error instanceof ConfigError && error.missing.join() === "OPENROUTER_KEY_USAGE_START_USD",
+  );
+  const config = loadConfig({
+    ...keys,
+    OPENROUTER_KEY_USAGE_CAP_USD: "0.02",
+    OPENROUTER_KEY_USAGE_START_USD: "22.4896",
+  });
+  assert.equal(config.OPENROUTER_KEY_USAGE_CAP_USD, 0.02);
+});

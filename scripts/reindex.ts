@@ -1,18 +1,20 @@
 // Rebuilds every memory from the message log, e.g. after changing the extraction prompt or model.
 // Stop `npm run dev` first, so it doesn't extract the same turns at the same time.
+import "./load-env";
 import { openDb } from "@/adapters/db";
 import { openRouterStructured } from "@/adapters/llm";
 import { loadConfig } from "@/config";
 import { memorize } from "@/core/memory/extract";
 import { createMemoryStore } from "@/core/memory/memories";
 import { createStore } from "@/core/memory/store";
+import { openRouterAccount } from "@/server/services";
 
 const config = loadConfig();
 const db = openDb();
 const deps = {
   store: createStore(db),
   memories: createMemoryStore(db),
-  llm: openRouterStructured(config.OPENROUTER_API_KEY, config.MEMORY_MODEL),
+  llm: openRouterStructured({ ...openRouterAccount(config), model: config.MEMORY_MODEL }),
 };
 
 deps.memories.reset();

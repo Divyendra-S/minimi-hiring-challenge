@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { mentionedDates } from "@/core/memory/dates";
+import { mentionedDates, pastWeekday } from "@/core/memory/dates";
 
 // Wednesday 11 November 2026, 15:00 in India.
 const wednesday = new Date("2026-11-11T09:30:00Z");
@@ -71,4 +71,13 @@ test("the future, the present and numbers that aren't dates are ignored", () => 
   ]) {
     assert.deepEqual(labels(text), [], text);
   }
+});
+
+test("pastWeekday counts back in the user's time zone, across a daylight-saving change", () => {
+  const now = new Date("2026-11-11T20:00:00Z"); // Wed 11 Nov, 15:00 in New York
+  const at = (weekday: number, time: string, weeksBefore?: number) =>
+    pastWeekday(now, "America/New_York", weekday, time, weeksBefore).toISOString();
+  assert.equal(at(2, "20:15"), "2026-11-11T01:15:00.000Z"); // Tue 10 Nov, EST
+  assert.equal(at(3, "09:00"), "2026-11-04T14:00:00.000Z"); // said on a Wednesday: last week's
+  assert.equal(at(4, "16:40", 1), "2026-10-29T20:40:00.000Z"); // EDT, before the change on 1 Nov
 });

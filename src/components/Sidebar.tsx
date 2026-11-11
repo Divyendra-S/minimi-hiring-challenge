@@ -1,9 +1,11 @@
-import { useSessions } from "@/client/queries";
+import { useLoadDemo, useSessions } from "@/client/queries";
+import { isDemo } from "@/shared/dto";
 
 type Props = { selectedId: string | null; onSelect: (id: string | null) => void };
 
 export function Sidebar({ selectedId, onSelect }: Props) {
   const sessions = useSessions();
+  const loadDemo = useLoadDemo();
   return (
     <nav className="hidden w-64 shrink-0 flex-col border-r border-neutral-200 bg-neutral-50 md:flex">
       <button
@@ -33,6 +35,20 @@ export function Sidebar({ selectedId, onSelect }: Props) {
           </li>
         ))}
       </ul>
+      {sessions.data && !sessions.data.some(isDemo) && (
+        <div className="m-3 space-y-2 text-xs text-neutral-500">
+          <p>To try recall, add three demo chats from the past two weeks.</p>
+          <button
+            type="button"
+            onClick={() => loadDemo.mutate()}
+            disabled={loadDemo.isPending}
+            className="rounded-lg border border-neutral-300 bg-white px-3 py-1.5 text-neutral-700 hover:bg-neutral-100 disabled:opacity-50"
+          >
+            Load demo history
+          </button>
+          {loadDemo.isError && <p className="text-red-700">{loadDemo.error.message}</p>}
+        </div>
+      )}
     </nav>
   );
 }

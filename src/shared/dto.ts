@@ -17,13 +17,25 @@ export type StoredMessage = {
   createdAt: string;
 };
 
+const TimeZone = z.string().refine(isTimeZone, "Unknown IANA time zone");
+
 /** Body of POST /api/chat. */
 export const ChatRequest = z.object({
   sessionId: z.string().optional(),
   message: z.string().trim().min(1).max(8000),
-  timezone: z.string().refine(isTimeZone, "Unknown IANA time zone"),
+  timezone: TimeZone,
 });
 export type ChatRequest = z.infer<typeof ChatRequest>;
+
+/** Body of POST /api/demo: the demo chats are dated in the user's time zone. */
+export const DemoRequest = z.object({ timezone: TimeZone });
+
+/** Demo chats are titled "Demo: ...", so they're never mistaken for real ones. */
+export const DEMO_TITLE = "Demo: ";
+
+export function isDemo(session: SessionSummary): boolean {
+  return session.title.startsWith(DEMO_TITLE);
+}
 
 function isTimeZone(timeZone: string): boolean {
   try {

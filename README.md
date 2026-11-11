@@ -14,10 +14,11 @@ npm run dev            # http://localhost:3000
 
 ## Scripts
 
-| Command             | What it does                    |
-| ------------------- | ------------------------------- |
-| `npm run dev`       | Start the app                   |
-| `npm test`          | Unit tests (no API keys needed) |
-| `npm run typecheck` | TypeScript check                |
-| `npm run lint`      | Biome lint and format check     |
+| Command             | What it does                                                                                  |
+| ------------------- | --------------------------------------------------------------------------------------------- |
+| `npm run dev`       | Start the app                                                                                 |
+| `npm test`          | Unit tests (no API keys needed)                                                               |
+| `npm run eval`      | Offline evals of memory recall (free); `-- --live <case ids>` also runs them on the real APIs |
+| `npm run typecheck` | TypeScript check                                                                              |
+| `npm run lint`      | Biome lint and format check                                                                   |
 # minimi-hiring-challenge

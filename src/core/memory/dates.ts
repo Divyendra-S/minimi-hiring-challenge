@@ -31,8 +31,7 @@ function spansFor(result: chrono.ParsedResult, today: number): Span[] {
 
   if (weekday !== null && start.isCertain("weekday") && !start.isCertain("day")) {
     // "Monday" means the latest one before today. "Last Tuesday" can also mean the week before.
-    const back = (new Date(today).getUTCDay() - weekday + 7) % 7 || 7;
-    const latest = today - back * DAY_MS;
+    const latest = today - daysBack(today, weekday) * DAY_MS;
     return phrase.startsWith("last") ? [one(latest), one(latest - 7 * DAY_MS)] : [one(latest)];
   }
   if (result.end) {
@@ -57,6 +56,28 @@ function spansFor(result: chrono.ParsedResult, today: number): Span[] {
 
 function one(from: number): Span {
   return { from, days: 1 };
+}
+
+/** Days from the latest `weekday` (0 is Sunday) before `today` to `today`: 1 to 7. */
+function daysBack(today: number, weekday: number): number {
+  return (new Date(today).getUTCDay() - weekday + 7) % 7 || 7;
+}
+
+/**
+ * The instant `timeZone` shows `time` ("20:15") on the latest `weekday` (0 is Sunday) before
+ * today, or that many `weeksBefore` it.
+ */
+export function pastWeekday(
+  now: Date,
+  timeZone: string,
+  weekday: number,
+  time: string,
+  weeksBefore = 0,
+): Date {
+  const [hours = 0, minutes = 0] = time.split(":").map(Number);
+  const today = startOfDay(wallClock(now, timeZone));
+  const day = today - (daysBack(today, weekday) + 7 * weeksBefore) * DAY_MS;
+  return fromWallClock(day + (hours * 60 + minutes) * 60_000, timeZone);
 }
 
 function toRange({ from, days }: Span, today: number, timeZone: string): DayRange {

@@ -123,6 +123,26 @@ test("finds memories by keyword, and by entities named in the last few messages"
   assert.ok(!byEntity.includes("Neon"), byEntity);
 });
 
+test("a conversation found by date brings in its memories, with no keyword match", () => {
+  const { store, memories } = stores();
+  // Its answer is quoted cut short, so the prices it gave come in as memories.
+  const turn = logTurn(store, "u1", "2026-11-03T09:00:00.000Z", { question: "Which CRMs fit?" });
+  memories.save("u1", turn, [
+    {
+      kind: "claim",
+      text: "Pipedrive Growth costs $34 per user per month.",
+      topic: "CRM tools",
+      entities: ["Pipedrive"],
+    },
+  ]);
+  const message = "What did I ask you on 3 November?";
+  const context = buildContext(
+    { store, memories },
+    { userId: "u1", sessionId: "none", message, recent: [], now, timeZone },
+  );
+  assert.ok(context.includes("claim: Pipedrive Growth costs $34 per user per month."), context);
+});
+
 test("keyword queries keep the meaningful words, quoted", () => {
   assert.equal(
     keywordQuery("Has any of Neon's pricing changed since then?"),

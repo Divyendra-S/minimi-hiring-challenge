@@ -14,7 +14,11 @@ export function ChatView({ sessionId, onSession }: Props) {
   const isSaved = (id?: string) => saved.some((m) => m.id === id);
 
   const end = useRef<HTMLDivElement>(null);
-  useEffect(() => end.current?.scrollIntoView({ block: "end" }));
+  // Braces matter: newer browsers return a Promise from scrollIntoView, and React would take a
+  // returned value for a cleanup function.
+  useEffect(() => {
+    end.current?.scrollIntoView({ block: "end" });
+  });
 
   return (
     <>

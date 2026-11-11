@@ -82,6 +82,12 @@ export function createMemoryStore(db: Db) {
   const selectOfSession = db.prepare<[string, string], { text: string }>(
     "SELECT text FROM memories WHERE user_id = ? AND session_id = ? ORDER BY observed_at",
   );
+  // The newest N from the given sessions. The ids arrive as a JSON array.
+  const selectFromSessions = db.prepare<[string, string, number], Memory>(
+    `SELECT ${MEMORY_COLUMNS} FROM memories m
+     WHERE m.user_id = ? AND m.session_id IN (SELECT value FROM json_each(?))
+     ORDER BY m.observed_at DESC LIMIT ?`,
+  );
 
   /** Saves a turn's memories and marks the turn as done, in one transaction. */
   const save = db.transaction((userId: string, turn: Turn, memories: NewMemory[]): number => {
@@ -132,6 +138,11 @@ export function createMemoryStore(db: Db) {
     /** Keyword search (BM25, stemmed), best first. `query` uses FTS5 syntax. */
     matching(userId: string, query: string, limit: number): Memory[] {
       return selectMatching.all(query, userId, limit);
+    },
+    /** What was remembered from these conversations, newest first. */
+    fromSessions(userId: string, sessionIds: string[], limit: number): Memory[] {
+      if (sessionIds.length === 0) return [];
+      return selectFromSessions.all(userId, JSON.stringify(sessionIds), limit);
     },
     textsOfSession(userId: string, sessionId: string): string[] {
       return selectOfSession.all(userId, sessionId).map((row) => row.text);

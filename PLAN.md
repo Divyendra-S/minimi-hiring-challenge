@@ -1,6 +1,6 @@
 # Plan: web-search chat agent with long-term memory
 
-> Working plan for the minimi hiring challenge. Status: **Phases 1–4 built; first live test passed (2 turns)**, see §8.
+> Working plan for the minimi hiring challenge. Status: **Phases 1–5 built; Phase 5's evals pass offline (32/32), live run pending**, see §8.
 > Written 2026-11-11. Sections marked **Verify** need checking against live docs while building.
 
 ---
@@ -220,6 +220,7 @@ POST /api/chat { sessionId?, message, timezone }
 - Low reasoning effort for chat latency (**Verify** OpenRouter's `reasoning` parameter for Luna).
 - History sent to the model: the last 20 messages of the current session. Older context comes from memory, not raw history.
 - Pass `AbortSignal` from the request through to the LLM and search calls, so the Stop button cancels everything.
+- **Optional spending cap:** `OPENROUTER_KEY_USAGE_CAP_USD` (e.g. `0.02`) is the most the app may spend, counted from `OPENROUTER_KEY_USAGE_START_USD`, the key's lifetime usage when the cap began. OpenRouter only reports lifetime usage, so the start is needed, and setting a cap without it fails config validation. Every request the SDK sends (retries included, via its `fetch` option) first reads usage from OpenRouter's free `GET /api/v1/key`. Once spent + $0.003 reaches the cap (usage is reported a few seconds late), or if usage can't be read, the adapter answers 402 itself, which the SDK doesn't retry. It adds one small request per model call, so it's for shared or test keys; unset means no cap.
 - Measure and store: time to first token, total time, number of searches, token usage and cost (OpenRouter returns usage).
 
 ### 4.4 The `web_search` tool
@@ -290,8 +291,9 @@ CREATE TABLE memorized (message_id TEXT PRIMARY KEY);   -- answers extraction ha
    - If nothing is found: `Conversations on Tue, 3 Nov 2026, apart from this one: none.`
 2. **Keywords.** FTS5 over memories (text + topic): the message's words minus stopwords, joined with OR, top 8 by `bm25()`.
 3. **Entities.** Known entity names that appear as whole words in the message or in the last 4 messages of this session (which handles "them" and "it"). For each, its newest 5 memories. This is where claim timelines come from.
-4. **Merge** the two lists, keep at most 24, and show them oldest first: date, kind, text, source URL. If none: `Saved memories: none match this message.`
-5. **Session index.** Titles and last-active dates of the user's 20 most recent other sessions. If none: `Earlier conversations: none. This is the first one.`
+4. **Memories of the conversations found by date** (added in Phase 5), newest 16. Those answers are quoted cut to 400 characters, so a five-item answer loses items. Its memories keep every price and its source, even when no keyword of the message matches, as in "What did I ask you on 3 November?".
+5. **Merge** the lists in that order (date, keyword, entity), keep at most 24, and show them oldest first: date, kind, text, source URL. If none: `Saved memories: none match this message.`
+6. **Session index.** Titles and last-active dates of the user's 20 most recent other sessions. If none: `Earlier conversations: none. This is the first one.`
 
 **Changed in Phase 4: no weighted score.** Mem0's `(semantic + keyword + entity) / 2.5` merges candidates from a vector search over large stores. Here an entity match is exact, so it is always kept, and keyword matches fill in topics that name no entity. A threshold like 0.3 would be a guess without eval data. Phase 5 can bring scoring back if evals show noise.
 
@@ -439,30 +441,44 @@ Defined once in `src/shared/events.ts` and imported by both server and client. `
 - store dedupe and claim versioning
 - NDJSON event encoding
 
-**Evals** (`npm run eval`, real APIs):
+**Live API budget (set 2026-11-11):** at most $0.02 of OpenRouter spend, enforced by `OPENROUTER_KEY_USAGE_CAP_USD=0.02` (§4.3), and about 10 more model calls for all remaining testing. So the evals run offline by default, and live only on cases named on the command line.
 
-- **About 25 cases** in seven groups:
+**Evals** (`npm run eval`, built in Phase 5):
+
+- **32 cases** in `evals/cases.ts`, in eight groups:
+  - (s) the brief's three examples word for word, each on an empty history and on the demo history
   - (a) memory traps on an empty database
-  - (b) date recall on seeded history
-  - (c) "changed since" on seeded claims
+  - (b) date recall on the demo history
+  - (c) "changed since" on its saved claims
   - (d) fresh facts that need search
-  - (e) no-search small talk, as a latency check
+  - (e) small talk, which shouldn't search
   - (f) follow-ups that use pronouns
   - (g) ambiguous dates
-- **Fixed clock:** `AGENT_NOW` overrides `clock.now()` for evals and seeding only.
-- **Grading:**
-  - deterministic checks first: searched or not, cited or not, right date mentioned, no invented history
-  - then an LLM judge with a short rubric (`JUDGE_MODEL`)
-- **Report:** pass rate per group, p50/p90 time to first token and total time, cost per turn.
-- Run on 2 models; the results go in DESIGN.md.
-- **Budget:** about 50 Tavily credits per run, so the free plan allows about 20 runs a month.
+- **Fixed clock and data:** Wed 11 Nov 2026, 15:00 in New York; each case runs on a fresh in-memory database, seeded with the demo chats when it needs history.
+- **Offline, on every run and in CI (free):** each case goes through the real `chat()` with a stand-in model that records its prompt. The checks are on the context: the days it resolved, the conversations and memories it pulled in, and the "none" lines it must show.
+- **Live, opt-in:** `npm run eval -- --live a1 c1 g1` also runs the named cases with the real model and Tavily. Its checks on each answer are all mechanical:
+  - whether it searched, and with fresh pages
+  - whether a searched answer cites
+  - patterns the answer must contain (the right date, "no record" on a trap)
+- **Report:** pass rate per group; p50/p90 of the time spent in our code (offline), and of time to first token and total time (live); model calls, search queries, and cost per turn from the key's usage before and after.
+- **Safety:** `--max-calls` (default 8) stops a live run, and the spending cap still applies.
+- **Dropped from the plan:**
+  - the LLM judge: it costs a call per case and adds noise, while the checks that matter here are mechanical
+  - the 2-model comparison: the borrowed key's budget doesn't allow it. With another key, `CHAT_MODEL=<model> npm run eval -- --live <ids>` runs it
+  - `AGENT_NOW`: the eval sets the clock through `deps.now`, so the app needs no override
 
-**Seed demo** (`npm run seed:demo`, opt-in): sessions dated 3 Nov (Postgres hosting, with claims) and Mon 9 Nov (CRM shortlist for a 20-person team), clearly labelled as demo data.
+**Demo history** (opt-in): the sidebar offers "Load demo history" until it is loaded. It calls `POST /api/demo`, which adds three chats dated relative to now, with their memories written by hand (no model call):
+
+- a Thursday the week before last: a laptop for programming, ending in a decision
+- the latest Monday: five CRM tools for a 20-person sales team, as in the brief's example
+- the Tuesday before last at 20:15: Postgres hosting, with priced claims and sources. On 11 Nov that is 3 Nov, so both "last Tuesday" and "3 November" from the brief point to it, and "last Tuesday" has to choose between two Tuesdays
+
+Titles start with "Demo:". It is a button, not a script, because a script can't know which browser's cookie to seed. It works beside real chats; the button hides once the demo is loaded, and the route refuses a second load. (A first version allowed it only on an empty history. That meant testing in a private window, which has none of your memory, so it was dropped.)
 
 **CI** (GitHub Actions):
 
 - matrix: `ubuntu`, `macos`, `windows` × Node `22`, `24`, `26`
-- steps: `npm ci`, typecheck, lint, unit tests, plus a smoke test that opens SQLite and runs an FTS5 query
+- steps: `npm ci`, typecheck, lint, unit tests (which open SQLite and run FTS5 queries), the offline eval, build
 - Proves that `npm install` works on every common setup.
 
 ---
@@ -545,6 +561,25 @@ Each phase ends in a working app: typecheck, lint, tests and build pass, then a 
   - It quoted the earlier question and said it has no record for 3 November, without searching. First token at 1.4 s.
 - **Cost:** OpenRouter $0.0008 for 5 calls (2 chat + 1 chat + 2 extraction). Tavily: 1 search request; its usage endpoint still showed 0 afterwards.
 - **Found and fixed:** all 5 results of the one query were Neon's pricing page (http, https, `www.`, a `?bb=` parameter, a mirror). Results are now deduplicated by a normalised address (scheme, `www.`, trailing slash and hash ignored) and by identical opening text.
+
+**Phase 5 result (2026-11-11):**
+
+- **Built:**
+  - `evals/cases.ts` (32 cases) and `evals/run.ts` (`npm run eval`)
+  - `src/core/memory/demo.ts`, `POST /api/demo`, and the "Load demo history" button
+  - `pastWeekday()` in `dates.ts`, which dates the demo chats
+  - `keyUsage()` in the OpenRouter adapter, now shared by the spending cap and the eval's cost report
+  - `scripts/load-env.ts`: scripts read `.env.local`, then `.env`, as Next.js does. `npm run reindex` used to read `.env` only.
+- **Aligned with the brief (second pass):** the first demo had three CRMs and the Postgres chat on 10 Nov, so the brief's "3 November" example found nothing. Now:
+  - the demo has five tools, and the Postgres chat is on the Tuesday before last
+  - group (s) runs the brief's prompts word for word
+  - group (g) adds a wrong date ("Yesterday we shortlisted…" when it was Monday). This is what a tester sees after setting up history on the day they test. The topic still finds the chat, and a new system-prompt rule tells the model to use it and say which day it was from.
+- **Read-path gap found and fixed:** a chat found by date now brings its memories (§4.6, step 4). Without that, the brief's "3 November" example and "What did I ask you on Monday?" fail the eval.
+- **Offline result:** 32/32. Time in our code per turn: p50 0 ms, p90 2 ms (in-memory SQLite, stand-in model). So recall adds nothing noticeable to a turn.
+- **Checked the checks:** printed contexts match the cases. A deliberately wrong expectation fails, and the run then exits with 1.
+- **Checked:** 49 unit tests, lint, typecheck, build. On `next dev` with curl: a bad time zone gets 400, the first load 204, a second load 409, and the chats land on the right days. The test user's rows were deleted afterwards.
+- **Gap found while writing cases:** chrono doesn't read "on the 3rd" (no month). Keyword search and the session list still apply. Not fixed yet.
+- **Not run yet:** the live eval. It waits for approval, because of the key's budget.
 
 ---
 
