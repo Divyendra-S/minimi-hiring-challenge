@@ -305,3 +305,102 @@ on Node 24, the 16 hard cases on Node 20.
   wanted "Postgres", and "I don't have any earlier conversation" was not on the list of ways
   to say "no record". Both checks were widened.
 - The driver changed nothing in the answers or the timings: our own code takes 4 to 6 ms a turn.
+
+## 12. Third round: a longer history, replaced values, and re-checking in code
+
+**Why.** The sample history was 31 chats and 41 turns: most chats were one question and one answer, which is too easy to recall from.
+
+**The history now.** 47 chats and 191 turns, written by hand with no model call; the answers are full-length replies, about 980 characters on average. Most chats have three to five turns, and facts sit in the later turns. Two more values change over time (the side project's analytics and Pipedrive's price).
+
+**What broke.** The 113 existing checks, run unchanged on the longer history: 106 passed.
+
+| Failure                                           | Cause                                                           | Fix                                                                          |
+| ------------------------------------------------- | --------------------------------------------------------------- | ---------------------------------------------------------------------------- |
+| "What did I ask in September?", "three weeks ago" | A range was quoted in full, up to 40 messages; a month has more | Up to 40 messages in full, up to 160 as questions only, then first questions |
+| "List every tool I've decided to use", "my stack" | 24 memories were too few once there were 25 decisions           | Keyword matches 12 → 24, nearest 8 → 12, total 24 → 40                       |
+| "last week ... what did I pick"                   | Only the newest 16 memories of a date range were considered     | 16 → 60, so a second signal can lift an older one                            |
+
+After the fixes: 113 of 113, and 135 of 135 with 22 new checks on later turns, replaced values and re-checks.
+
+**Replaced values.** A memory can carry a subject. Recall adds every memory with the same subject and marks them `[replaced on <day>]` or `[current]`. Extraction is shown the subjects already in use, so it reuses a name.
+
+**Re-check in code.** When the message asks whether remembered web facts still hold (two regular expressions), code fetches the sources of the matching claims with Tavily Extract before the first model call. Pages are fetched only for claims found in two ways, or for all claims of a named day when no topic is given. One loose match is not enough: an earlier version fetched five pages by rank, and two to four of them were off topic.
+
+**Live runs** (11 Nov 2026, each case once, `gpt-6-luna`).
+
+- 20 cases on the longer history: 19 passed. No-search questions gave their first word in 1.5 to 3.2 s. The miss: "that db thing i asked abt, is it still same price??" was answered about the work database (AWS RDS), not Neon; there are now four database chats, and the answer named only one.
+- First version of the re-check, which asked each page for passages about the user's question: the model searched again in 6 of 8 cases, because the passages often left the price out. Those turns took two model calls plus the fetch.
+- Second version, which asks each page for passages about its own claim: the model searched again in 4 of 7, then in 1 of 4 on the rerun below.
+- Back to back, same four questions, on an hour when the provider was about twice as slow as earlier (no-search first word 3.8 to 4.7 s):
+
+| Question                                     | First word, re-check off | First word, re-check on | Model calls on |
+| -------------------------------------------- | ------------------------ | ----------------------- | -------------- |
+| The brief's Postgres question                | 10.0 s                   | 6.9 s                   | 1              |
+| "Did Pipedrive's price change since Monday?" | 8.6 s                    | 5.0 s                   | 1              |
+| "Is Slack Pro still $8.75 a user?"           | 8.1 s                    | 6.7 s                   | 1              |
+| "Is the MacBook you recommended still $999?" | 10.8 s                   | 12.7 s                  | 2              |
+
+- With the re-check off, one answer in four cited nothing after searching; with it on, all four cited the page.
+- After this run: the fetch timeout went from 3 s to 2 s (two fetches had hit 3 s), and a product named in the message now narrows which pages are fetched (the Slack question had fetched four pages, three of them off topic). These two changes are tested offline only.
+
+**What this does not show.** Four questions, one run each, on a slow hour. The five-CRM question still takes two or three model calls, because "shipped something big" needs a news search that no saved page answers.
+
+## 13. Fourth round: full-length answers, and searching the log itself (11 Nov 2026)
+
+**Why.** The sample answers were rewritten as full replies (about 980 characters; they were about 90). Two things showed up that short answers had hidden.
+
+**1. A detail deep in an answer never reached the prompt.** Memories hold preferences, facts, decisions and sourced claims. Advice (how to get to Sintra, an offsite agenda, a recipe, restore steps) leaves no memory, so it could be found only by naming its day, and then the answer was quoted cut to 400 characters. Eight new checks ask for such details (group `z`): 0 of 8 passed.
+
+Fix: the log is searched as well. An FTS5 index holds one row per answer (the question and the answer; it stores no text of its own, and a trigger keeps it current). Up to three past answers are quoted whole, 1,500 characters each: the answer the top-ranked memory was learned from, then the best keyword matches. When the message names days that have conversations, only those are searched.
+
+| Past answers quoted | Group `z` | All checks |
+| ------------------- | --------- | ---------- |
+| 0 (before)          | 0 of 8    | 135 of 143 |
+| 1                   | 3 of 8    | 138 of 143 |
+| 2                   | 7 of 8    | 142 of 143 |
+| 3                   | 8 of 8    | 143 of 143 |
+
+- Keyword search alone passed 7 of 8 with three answers. The eighth ("what should I book first for the Portugal trip") shares no word with the chat; the memory found by meaning points to its answer.
+- Cost: the median context went from about 4,900 to 8,200 characters (about 850 tokens). Recall takes 5 ms p50, 7 ms p90 (4 and 6 before). An existing database of 799 answers was indexed in 12 ms on first start.
+- Tried and dropped: a score cut-off to keep off-topic answers out. BM25 scores did not separate them: "How do we get to Sintra again?" scores 5.8 on the right answer, "Thanks, that was really helpful!" scores 6.5 on an unrelated one. So small talk also gets up to three old answers quoted. The prompt says to ignore the ones about something else.
+
+**2. The "that db thing" miss.** With no day and no product named, code still fetched pages for claims found in two loose ways. Here that was one page (AWS RDS) out of four database chats, and the answer covered only that one. Now code fetches only when the message names a day or a product; otherwise the model searches for itself, as it did before the re-check existed. Six of the other 23 "is it still so?" questions in the set lose the fetch this way, among them "did the laptop get cheaper", "Are the CRM prices you gave me still right?" and "Is the MacBook you recommended still $999?": they take two model calls again, not one. The brief's three questions name a day and keep it.
+
+**Live run** (11 Nov 2026, four questions, each once, `gpt-6-luna`, 5 model calls in all). All four passed.
+
+| Question                                    | Result                                                                                     | First word | Model calls |
+| ------------------------------------------- | ------------------------------------------------------------------------------------------ | ---------- | ----------- |
+| "that db thing i asked abt, is it still..." | Answered for both readings: Neon (side project) and AWS RDS (work), each checked and cited | 6.0 s      | 2           |
+| "How do we get to Sintra again?"            | Rossio train, 40 minutes, bus 434, timed Pena ticket: all from the quoted answer           | 1.5 s      | 1           |
+| "what was the rough agenda ... offsite?"    | The full agenda with times, and the 18:00 finish                                           | 1.8 s      | 1           |
+| "Thanks, that was really helpful!"          | "You're welcome": the quoted answers were ignored                                          | 1.5 s      | 1           |
+
+One run each, so this shows the changes work, not how often. The six vague questions that lost the fetch were not rerun.
+
+## 14. Fifth round: why some answers end in "couldn't verify" (11 Nov 2026)
+
+**Second live run after section 13** (six questions, each once): all six passed their checks, including the brief's three. But three answers said "couldn't verify": the MacBook Air's price, Node's latest patch version, and Zoho's price in dollars. First word on the brief's three: 5.7, 9.1 and 9.4 s.
+
+**Guess: the model sees only snippets, so read the page in full.** Tested on those three questions, with Tavily's `include_raw_content`:
+
+| Tried                                               | Value found                      | Time per search |
+| --------------------------------------------------- | -------------------------------- | --------------- |
+| Full text of the pages the site search returned     | 0 of 3                           | 0.4 to 1.5 s    |
+| The same query on the open web, no `site`           | 3 of 3, all on third-party pages | 0.7 to 1.1 s    |
+| `search_depth: basic`, with and without a `country` | Better pages; a value on 1 of 3  | 2.3 to 4.6 s    |
+
+- The cause is which pages the fast search returns for a `site`, not how much of them is shown: Apple's Hong Kong store in Chinese, Node's 2019 blog post in five languages, and Zoho's rupee page. `country` is refused at `fast` depth.
+- Built and reverted: every `site` search also ran on the open web, and two of its four results came from there. Five live questions passed, but none of the three answers improved. The model did not use a third-party price (Best Buy's $975) in place of the vendor's, which is defensible. It cost one more Tavily request per search, so it was removed.
+- Adopted: a `site` search already runs twice at once (live pages, and Tavily's copy as a fallback). The second one now runs at `basic` depth, and the two lists are taken in turn. Open-web and news searches stay at `fast`. Live at `basic` was not used: it took 3.4 to 4.6 s and returned no page for Neon.
+
+Five live questions, before and after (each once):
+
+| Question                           | Before                                  | After                                                     | First word   |
+| ---------------------------------- | --------------------------------------- | --------------------------------------------------------- | ------------ |
+| "did the laptop get cheaper"       | "the page doesn't show a price"         | $1,199 → $999 for the same model, citing Apple's buy page | 5.7 → 5.7 s  |
+| "latest LTS version of Node.js?"   | Node 26 in one run, Node 24 in the next | Node 26, after a second search round                      | 6.9 → 12.3 s |
+| The brief's five-CRM question      | Zoho's dollar price not confirmed       | The same: the page is still shown in rupees               | 9.0 → 8.5 s  |
+| "Is Slack Pro still $8.75 a user?" | Correct                                 | Correct                                                   | 5.1 → 5.0 s  |
+| The brief's Postgres question      | Correct                                 | Correct                                                   | 6.6 → 6.5 s  |
+
+So one of the three weak answers is fixed, one is unchanged, and the Node answer is right but took three model calls in this run. The slowest search took 1.6 to 2.8 s. Zoho stays a limit: its pricing page is served by region.

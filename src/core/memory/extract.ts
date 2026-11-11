@@ -8,6 +8,8 @@ import type { Store } from "./store";
 const EARLIER_MESSAGES = 4;
 const MESSAGE_CHARS = 4000;
 const TITLE_CHARS = 80;
+// Shown to the extraction model so it reuses a subject's name instead of coining a second one.
+const KNOWN_SUBJECTS = 40;
 
 // Strict structured output needs every field present, so "absent" is null rather than optional.
 const Extraction = z.object({
@@ -18,6 +20,7 @@ const Extraction = z.object({
       text: z.string(),
       topic: z.string(),
       entities: z.array(z.string()),
+      subject: z.string().nullable(),
       source: z.number().nullable(),
     }),
   ),
@@ -37,6 +40,7 @@ Rules:
 - Write about the user in the third person ("The user ...").
 - topic: 2-4 words for the subject area, e.g. "Postgres hosting" or "CRM tools".
 - entities: the products, companies, people or places the memory is about, as they are named.
+- subject: when a later memory could replace this one, a short name for what it is the value of: "Neon Launch plan price", "sales team size", "side project database host". Not the value itself. If "Subjects already in use" lists the same thing, copy that name exactly. Null for memories nothing would replace, such as a one-off fact.
 - source: the citation number for a claim; null for the other kinds.
 - Use only what this turn says. Skip greetings, questions that carry no information, and anything listed as already saved.
 - Keep every price and plan detail the answer cites. Otherwise prefer a few precise memories to many vague ones, and return an empty list when nothing is worth keeping.
@@ -81,6 +85,7 @@ async function memorizeTurn(deps: ExtractDeps, userId: string, turn: Turn): Prom
           firstTurn,
           earlier: session.slice(Math.max(0, at - 1 - EARLIER_MESSAGES), at - 1),
           saved: deps.memories.textsOfSession(userId, turn.sessionId),
+          subjects: deps.memories.subjects(userId, KNOWN_SUBJECTS),
           question,
           answer,
         }),
@@ -107,6 +112,7 @@ function toMemory(memory: Extracted, sources: Source[]): NewMemory[] {
       text,
       topic: memory.topic.trim(),
       entities: memory.entities,
+      subject: memory.subject ?? undefined,
       sourceUrl: memory.kind === "claim" ? source?.url : undefined,
     },
   ];
@@ -117,6 +123,7 @@ function describeTurn(turn: {
   firstTurn: boolean;
   earlier: StoredMessage[];
   saved: string[];
+  subjects: string[];
   question: StoredMessage;
   answer: StoredMessage;
 }): string {
@@ -128,6 +135,10 @@ function describeTurn(turn: {
     section(
       "Already saved from this conversation",
       turn.saved.map((text) => `- ${text}`),
+    ),
+    section(
+      "Subjects already in use",
+      turn.subjects.map((subject) => `- ${subject}`),
     ),
     section("Latest turn", [line(turn.question), line(turn.answer)]),
     section("Sources cited in the answer", sources),

@@ -44,3 +44,23 @@ test("sessions are listed per user, most recently active first", () => {
   );
   assert.equal(store.hasSession("u2", older), false);
 });
+
+test("a database from before the keyword index gets one built from its messages", () => {
+  const db = openDb(":memory:");
+  const before = createStore(db);
+  const sessionId = before.createSession("u1", "Trip", "2026-11-01T10:00:00.000Z");
+  const turn = { sessionId, userId: "u1", createdAt: "2026-11-01T10:00:00.000Z" };
+  before.addMessage({ ...turn, role: "user", content: "How do we get to Sintra?" });
+  const answerId = before.addMessage({ ...turn, role: "assistant", content: "By train." });
+  db.exec("DROP TRIGGER turns_fts_insert; DROP TABLE turns_fts;");
+
+  const store = createStore(db);
+  // The question's words find the turn too, and the answer comes back with its question.
+  const [found] = store.turnsMatching("u1", '"sintra"', "other-session", null, 3);
+  assert.equal(found?.id, answerId);
+  assert.equal(found?.question, "How do we get to Sintra?");
+  assert.deepEqual(store.turnsMatching("u1", '"sintra"', sessionId, null, 3), []);
+  assert.deepEqual(store.turnsMatching("u1", '"sintra"', "other-session", ["s2"], 3), []);
+  assert.equal(store.turn("u1", answerId, "other-session")?.content, "By train.");
+  assert.equal(store.turn("u2", answerId, "other-session"), undefined);
+});

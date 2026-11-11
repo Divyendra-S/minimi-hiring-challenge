@@ -27,6 +27,7 @@ const claim = (text: string, source: number | null) => ({
   text,
   topic: "Postgres hosting",
   entities: [text.split("'")[0]],
+  subject: `${text.split("'")[0]} plan price`,
   source,
 });
 
@@ -48,6 +49,7 @@ test("turns a finished turn into memories, with each claim tied to the page it c
           text: "The user is building a side project.",
           topic: "Postgres hosting",
           entities: [],
+          subject: null,
           source: null,
         },
       ],
@@ -60,6 +62,7 @@ test("turns a finished turn into memories, with each claim tied to the page it c
   assert.match(prompt, /Date of the conversation: 2026-11-03/);
   assert.match(prompt, /First turn of the conversation: yes/);
   assert.match(prompt, /\[1\] Neon pricing - https:\/\/neon\.com\/pricing/);
+  assert.match(prompt, /Subjects already in use:\n\(none\)/);
 
   const saved = memories.matching("u1", '"neon" OR "supabase" OR "project"', 10);
   assert.deepEqual(saved.map((m) => [m.kind, m.sourceUrl, m.observedAt]).sort(), [
@@ -91,6 +94,7 @@ test("later turns see what was already saved, and keep the session title", async
     prompt,
     /Already saved from this conversation:\n- Neon's Launch plan costs \$19\/month\./,
   );
+  assert.match(prompt, /Subjects already in use:\n- neon plan price/);
   assert.equal(store.listSessions("u1")[0]?.title, "Postgres hosting");
 });
 

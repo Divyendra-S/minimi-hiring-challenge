@@ -15,11 +15,9 @@ test("the sample prompts resolve to the days they mean", () => {
   ]);
   assert.deepEqual(
     labels("What did I ask you on 3 November? Is your answer still correct today?"),
-    [
-      ["on 3 November", ["Tue, 3 Nov 2026"]],
-      ["today", ["Wed, 11 Nov 2026"]],
-    ],
+    [["on 3 November", ["Tue, 3 Nov 2026"]]], // "today" is when to compare, not a day to recall
   );
+  assert.deepEqual(labels("What did I ask you today?"), [["today", ["Wed, 11 Nov 2026"]]]);
   // Said on a Wednesday, "last Tuesday" may be yesterday or the week before, so both are checked.
   assert.deepEqual(labels("Last Tuesday I asked you about Postgres hosting."), [
     ["Last Tuesday", ["Tue, 10 Nov 2026", "Tue, 3 Nov 2026"]],

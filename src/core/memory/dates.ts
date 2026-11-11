@@ -29,12 +29,18 @@ export function mentionedDates(text: string, now: Date, timeZone: string): DateM
       const phrase = `${result.text}${after?.[0] ?? ""}`;
       return { phrase, spans: spansFor(result, today, after !== null) };
     });
-  return [...parsed, ...otherSpans(plain, today)].flatMap(({ phrase, spans }) => {
-    const ranges = spans
-      .filter((span) => span.from <= today)
-      .map((span) => toRange(span, today, timeZone));
-    return ranges.length ? [{ phrase, ranges }] : [];
-  });
+  const found = [...parsed, ...otherSpans(plain, today)]
+    .map(({ phrase, spans }) => ({ phrase, spans: spans.filter((span) => span.from <= today) }))
+    .filter(({ spans }) => spans.length > 0);
+  // "What did I ask on 3 November? Is it still correct today?": next to an earlier day, today is
+  // when to compare, not a day to recall. Seen live: today's chats were quoted, and their pages
+  // (a cricket site) were re-checked in place of the ones from 3 November.
+  const isToday = ({ spans }: { spans: Span[] }) => spans.every((span) => span.from === today);
+  const past = found.filter((mention) => !isToday(mention));
+  return (past.length ? past : found).map(({ phrase, spans }) => ({
+    phrase,
+    ranges: spans.map((span) => toRange(span, today, timeZone)),
+  }));
 }
 
 /** Phrases chrono doesn't know: "two Mondays ago", "last weekend", "on the 3rd". */

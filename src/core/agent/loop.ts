@@ -28,9 +28,10 @@ export async function* runAgent(
   deps: AgentDeps,
   messages: ChatCompletionMessageParam[],
   signal?: AbortSignal,
+  /** Pages already in the prompt; search results are numbered after them. */
+  sources: Source[] = [],
 ): AsyncGenerator<ChatEvent> {
   const conversation = [...messages];
-  const sources: Source[] = [];
 
   for (let round = 0; ; round++) {
     const canSearch = round < MAX_SEARCH_ROUNDS;

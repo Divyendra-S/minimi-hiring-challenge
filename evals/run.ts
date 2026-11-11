@@ -2,6 +2,7 @@
 //                                  with a stand-in model, and the context the real model would
 //                                  get is checked.
 // npm run eval -- --show n2        Prints the prompt, context included, that a case gives the model.
+// npm run eval -- --live n3 --no-recheck   The same, with the re-check in code switched off.
 // npm run eval -- --live a1 c1 e1  Also runs the named cases with the real model and search,
 //                                  checks the answers, and reports latency and cost. This spends
 //                                  money, so it runs only the cases you name, at most --max-calls
@@ -11,7 +12,7 @@ import { parseArgs } from "node:util";
 import { openDb } from "@/adapters/db";
 import { localEmbedder } from "@/adapters/embedder";
 import { keyUsage, type Llm, openRouter } from "@/adapters/llm";
-import { type Search, tavily } from "@/adapters/tavily";
+import { type Read, type Search, tavily, tavilyReader } from "@/adapters/tavily";
 import { loadConfig } from "@/config";
 import { cachedSearch } from "@/core/agent/cache";
 import { type ChatDeps, chat } from "@/core/chat";
@@ -33,6 +34,7 @@ const USAGE_SETTLE_MS = 10_000;
 const embedder = localEmbedder();
 
 // The stand-in model answers at once, so offline timings are our own code: recall and storage.
+const none = async () => [];
 const stub: Llm = async function* () {
   yield { type: "delta", text: "(offline)" };
   return { text: "(offline)", toolCalls: [] };
@@ -42,6 +44,9 @@ type Run = {
   events: ChatEvent[];
   prompt: string;
   searches: { fresh: boolean; ms: number }[];
+  /** The pages code fetched before the model ran, to re-check remembered facts. */
+  rechecked: string[];
+  recheckMs: number;
   /** How long each model call took to finish. */
   modelMs: number[];
   error?: string;
@@ -52,6 +57,8 @@ const args = parseArgs({
   options: {
     live: { type: "boolean" },
     show: { type: "boolean" },
+    // For comparing: the model has to search for itself, as it did before the re-check existed.
+    "no-recheck": { type: "boolean" },
     "max-calls": { type: "string", default: "8" },
   },
 });
@@ -65,9 +72,9 @@ async function offline(): Promise<void> {
   console.log(`Context checks, offline: ${CASES.length} cases\n`);
   const results = [];
   for (const c of CASES) {
-    const run = await runCase(c, stub, async () => []);
+    const run = await runCase(c, stub, none, none);
     const context = run.prompt.match(/<context>\n([\s\S]*)\n<\/context>/)?.[1] ?? "";
-    results.push({ c, run, failures: run.error ? [run.error] : contextFailures(c, context) });
+    results.push({ c, run, failures: run.error ? [run.error] : contextFailures(c, context, run) });
   }
   printGroups(results);
   const ms = results.map(({ run }) => doneEvent(run)?.timings.totalMs ?? 0);
@@ -79,8 +86,11 @@ async function offline(): Promise<void> {
 async function show(ids: string[]): Promise<void> {
   for (const id of ids) {
     const c = CASES.find((c) => c.id === id) ?? fail(`No case "${id}".`);
-    const run = await runCase(c, stub, async () => []);
-    console.log(`--- ${c.id}: ${c.message}\n${run.prompt}\n`);
+    const run = await runCase(c, stub, none, none);
+    const rechecked = run.rechecked.length
+      ? `\nRe-checked in code: ${run.rechecked.join(", ")}`
+      : "";
+    console.log(`--- ${c.id}: ${c.message}${rechecked}\n${run.prompt}\n`);
   }
 }
 
@@ -95,16 +105,21 @@ async function live(ids: string[], maxCalls: number): Promise<void> {
     return model(request);
   };
   const search = cachedSearch(tavily(config.TAVILY_API_KEY), new Map());
+  const read = args.values["no-recheck"] ? none : tavilyReader(config.TAVILY_API_KEY);
   const usageBefore = await keyUsage(config.OPENROUTER_API_KEY);
 
   console.log(`\nAnswer checks, live: ${cases.length} cases on ${config.CHAT_MODEL}\n`);
   const results = [];
   for (const c of cases) {
     const callsBefore = calls;
-    const run = await runCase(c, llm, search);
+    const run = await runCase(c, llm, search, read);
     const failures = run.error ? [run.error] : answerFailures(c, run);
     const timings = doneEvent(run)?.timings;
-    const searched = run.searches.length === 0 ? "no search" : `${run.searches.length} queries`;
+    const searched =
+      (run.searches.length === 0 ? "no search" : `${run.searches.length} queries`) +
+      (run.rechecked.length
+        ? `, ${run.rechecked.length} pages re-checked in code in ${seconds(run.recheckMs)}`
+        : "");
     console.log(
       `${c.id}  ${failures.length ? "FAIL" : "pass"}  ${searched}, first token ` +
         `${seconds(timings?.firstTokenMs)}, total ${seconds(timings?.totalMs)}, ` +
@@ -134,10 +149,17 @@ async function live(ids: string[], maxCalls: number): Promise<void> {
 }
 
 /** Runs one case on a fresh in-memory database, through the same chat() the app uses. */
-async function runCase(c: EvalCase, llm: Llm, search: Search): Promise<Run> {
+async function runCase(c: EvalCase, llm: Llm, search: Search, read: Read): Promise<Run> {
   const db = openDb(":memory:");
   const store = createStore(db);
-  const run: Run = { events: [], prompt: "", searches: [], modelMs: [] };
+  const run: Run = {
+    events: [],
+    prompt: "",
+    searches: [],
+    rechecked: [],
+    recheckMs: 0,
+    modelMs: [],
+  };
   const deps: ChatDeps = {
     store,
     memories: createMemoryStore(db),
@@ -160,6 +182,15 @@ async function runCase(c: EvalCase, llm: Llm, search: Search): Promise<Run> {
       } finally {
         const ms = Math.round(performance.now() - started);
         run.searches.push({ fresh: options.fresh === true, ms });
+      }
+    },
+    read: async (urls, query, signal) => {
+      run.rechecked.push(...urls);
+      const started = performance.now();
+      try {
+        return await read(urls, query, signal);
+      } finally {
+        run.recheckMs = Math.max(run.recheckMs, Math.round(performance.now() - started));
       }
     },
   };
@@ -190,9 +221,14 @@ function earlierChat(store: Store, turns: NonNullable<EvalCase["earlier"]>): str
   return sessionId;
 }
 
-function contextFailures(c: EvalCase, context: string): string[] {
-  const { has = [], lacks = [] } = c.context;
+function contextFailures(c: EvalCase, context: string, run: Run): string[] {
+  const { has = [], lacks = [], rechecks } = c.context;
+  const missed = (rechecks ?? []).filter(
+    (domain) => !run.rechecked.some((u) => u.includes(domain)),
+  );
   return [
+    ...missed.map((domain) => `didn't re-check ${domain}`),
+    ...(rechecks?.length === 0 ? run.rechecked.map((url) => `re-checked ${url}`) : []),
     ...has.filter((text) => !context.includes(text)).map((text) => `context lacks: ${text}`),
     ...lacks.filter((text) => context.includes(text)).map((text) => `context has: ${text}`),
   ];
@@ -201,7 +237,7 @@ function contextFailures(c: EvalCase, context: string): string[] {
 function answerFailures(c: EvalCase, run: Run): string[] {
   const { search, official = [], has = [], lacks = [] } = c.answer;
   const answer = answerOf(run);
-  const searched = run.searches.length > 0;
+  const searched = run.searches.length > 0 || run.rechecked.length > 0;
   const cited = citedUrls(run, answer);
   return [
     search === true && !searched && "didn't search",

@@ -1,7 +1,7 @@
 import { getDb } from "@/adapters/db";
 import { type Embedder, localEmbedder } from "@/adapters/embedder";
 import { type OpenRouterOptions, openRouter, openRouterStructured } from "@/adapters/llm";
-import { tavily } from "@/adapters/tavily";
+import { tavily, tavilyReader } from "@/adapters/tavily";
 import { type Config, loadConfig } from "@/config";
 import { cachedSearch, type SearchCache } from "@/core/agent/cache";
 import type { ChatDeps } from "@/core/chat";
@@ -46,6 +46,7 @@ export function chatDeps(): ChatDeps {
     embedder: getEmbedder(),
     llm: openRouter({ ...openRouterAccount(config), model: config.CHAT_MODEL }),
     search: cachedSearch(tavily(config.TAVILY_API_KEY), globals.searchCache),
+    read: tavilyReader(config.TAVILY_API_KEY),
     now: () => new Date(),
   };
 }

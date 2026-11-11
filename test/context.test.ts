@@ -5,12 +5,14 @@ import { logTurn, stores } from "./fakes";
 
 const now = new Date("2026-11-11T09:30:00Z"); // Wed 11 Nov, 15:00 in India
 const timeZone = "Asia/Kolkata";
+const contextText = async (...args: Parameters<typeof buildContext>) =>
+  (await buildContext(...args)).text;
 
 test("on an empty history, every section says that nothing was found", async () => {
   const { store, memories } = stores();
   const sessionId = store.createSession("u1", "New chat", now.toISOString());
   const message = "What did I ask you on 3 November? Is your answer still correct today?";
-  const context = await buildContext(
+  const context = await contextText(
     { store, memories },
     { userId: "u1", sessionId, message, recent: [], now, timeZone },
   );
@@ -20,8 +22,6 @@ test("on an empty history, every section says that nothing was found", async () 
       "Now: Wednesday, 11 November 2026 at 15:00 (Asia/Kolkata)",
       '"on 3 November" means Tue, 3 Nov 2026.',
       "Conversations on Tue, 3 Nov 2026, apart from this one: none.",
-      '"today" means Wed, 11 Nov 2026.',
-      "Conversations on Wed, 11 Nov 2026, apart from this one: none.",
       "Saved memories: none match this message.",
       "Earlier conversations: none. This is the first one.",
     ].join("\n\n"),
@@ -40,7 +40,7 @@ test("recalls the conversations of a day in the user's time zone, except this on
   logTurn(store, "u1", "2026-11-03T19:00:00.000Z", { question: "Already 4 Nov in India" });
   const current = logTurn(store, "u1", "2026-11-03T10:00:00.000Z", { question: "This session" });
 
-  const context = await buildContext(
+  const context = await contextText(
     { store, memories },
     {
       userId: "u1",
@@ -90,7 +90,7 @@ test("finds memories by keyword, and by entities named in the last few messages"
     },
   ]);
   const context = (message: string, recent: string[] = []) =>
-    buildContext(
+    contextText(
       { store, memories },
       {
         userId: "u1",
@@ -138,7 +138,7 @@ test("a conversation found by date brings in its memories, with no keyword match
     },
   ]);
   const message = "What did I ask you on 3 November?";
-  const context = await buildContext(
+  const context = await contextText(
     { store, memories },
     { userId: "u1", sessionId: "none", message, recent: [], now, timeZone },
   );
@@ -171,7 +171,7 @@ test("one hop further: a memory found by keyword brings what else is known of it
     },
   ]);
   const message = "What have I decided on for my side project?";
-  const context = await buildContext(
+  const context = await contextText(
     { store, memories },
     { userId: "u1", sessionId: "none", message, recent: [], now, timeZone },
   );
@@ -203,7 +203,7 @@ test("finds a memory by meaning when no word matches, unless it is too far off",
   assert.deepEqual(memories.unembedded("u1"), []);
   // A stand-in for the model: this question points almost the same way as the first memory.
   const embedder = { embedIfReady: async () => new Float32Array([0.9, 0.1]) };
-  const context = await buildContext(
+  const context = await contextText(
     { store, memories, embedder },
     { userId: "u1", sessionId: "none", message: "What's my diet?", recent: [], now, timeZone },
   );
@@ -217,7 +217,7 @@ test("a long history also says how many conversations there are, and the first",
     const at = `2026-10-${String(day).padStart(2, "0")}T09:00:00.000Z`;
     store.setTitle("u1", logTurn(store, "u1", at).sessionId, `Chat ${day}`);
   }
-  const context = await buildContext(
+  const context = await contextText(
     { store, memories },
     { userId: "u1", sessionId: "none", message: "Hello", recent: [], now, timeZone },
   );
@@ -234,4 +234,119 @@ test("keyword queries keep the meaningful words, quoted", () => {
     '"neon" OR "pricing" OR "changed"',
   );
   assert.equal(keywordQuery("What did you say?"), null);
+});
+
+test("a newer memory about the same subject marks the older one as replaced", async () => {
+  const { store, memories } = stores();
+  const neon = (text: string) => ({
+    kind: "claim" as const,
+    text,
+    topic: "Postgres hosting",
+    entities: ["Neon"],
+    sourceUrl: "https://neon.com/pricing",
+    subject: "Neon Launch plan price",
+  });
+  memories.save("u1", logTurn(store, "u1", "2026-11-03T09:00:00.000Z"), [
+    neon("Neon's Launch plan costs $19/month."),
+    {
+      kind: "claim",
+      text: "Supabase Pro costs $25/month.",
+      topic: "Postgres hosting",
+      entities: ["Supabase"],
+      sourceUrl: "https://supabase.com/pricing",
+    },
+  ]);
+  // Spelled another way, and found by neither date nor keyword: its subject brings it in.
+  memories.save("u1", logTurn(store, "u1", "2026-11-06T09:00:00.000Z"), [
+    {
+      ...neon("The Launch tier is now $5 minimum."),
+      subject: "neon launch plan PRICE",
+      entities: [],
+    },
+  ]);
+  const context = await buildContext(
+    { store, memories },
+    {
+      userId: "u1",
+      sessionId: "none",
+      message: "What did Neon and Supabase cost on 3 November?",
+      recent: [],
+      now,
+      timeZone,
+    },
+  );
+  assert.ok(
+    context.text.includes(
+      "Neon's Launch plan costs $19/month. (source: https://neon.com/pricing) [replaced on Fri, 6 Nov 2026]",
+    ),
+    context.text,
+  );
+  assert.ok(
+    context.text.includes(
+      "The Launch tier is now $5 minimum. (source: https://neon.com/pricing) [current]",
+    ),
+    context.text,
+  );
+  assert.match(context.text, /Supabase Pro costs \$25\/month\. \(source: \S+\)\n/); // unmarked
+  // Each page is paired with the claim that stands now, not the one it replaced.
+  assert.deepEqual(
+    context.claims.sort((a, b) => a.url.localeCompare(b.url)),
+    [
+      { url: "https://neon.com/pricing", text: "The Launch tier is now $5 minimum." },
+      { url: "https://supabase.com/pricing", text: "Supabase Pro costs $25/month." },
+    ],
+  );
+});
+
+test("quotes in full a past answer that no memory holds, found by keyword in the log", async () => {
+  const { store, memories } = stores();
+  const late = "Book Pena Palace online in advance, with a timed entry slot.";
+  logTurn(store, "u1", "2026-10-24T09:00:00.000Z", {
+    question: "How do we get to Sintra?",
+    answer: `Take the train from Rossio [1]. ${"It takes 40 minutes. ".repeat(30)}${late}`,
+    sources: [{ n: 1, title: "CP", url: "https://www.cp.pt" }],
+  });
+  logTurn(store, "u1", "2026-10-25T09:00:00.000Z", {
+    question: "Which standing desk is good?",
+    answer: "The Flexispot E7.",
+  });
+  const sessionId = store.createSession("u1", "New chat", now.toISOString());
+  const ask = (userId: string) =>
+    contextText(
+      { store, memories },
+      { userId, sessionId, message: "sintra tickets again?", recent: [], now, timeZone },
+    );
+  const context = await ask("u1");
+  assert.match(context, /Earlier answers in full/);
+  assert.ok(context.includes('- Sat, 24 Oct 2026, in "Chat"\n  User: How do we get to Sintra?'));
+  assert.ok(context.includes(`Take the train from Rossio. It takes`)); // citation numbers removed
+  assert.ok(context.includes(`${late}\n  Pages cited: https://www.cp.pt`));
+  assert.ok(!context.includes("Flexispot"));
+  assert.doesNotMatch(await ask("u2"), /Earlier answers in full/); // another user's log
+});
+
+test("asked if an old answer is still correct today, today's chats are not what gets re-checked", async () => {
+  const { store, memories } = stores();
+  const claim = (text: string, sourceUrl: string) => ({
+    kind: "claim" as const,
+    text,
+    topic: "t",
+    entities: [],
+    sourceUrl,
+  });
+  const old = logTurn(store, "u1", "2026-11-03T06:00:00.000Z", { question: "Postgres hosts?" });
+  memories.save("u1", old, [claim("Neon Launch costs $19.", "https://neon.com/pricing")]);
+  const today = logTurn(store, "u1", "2026-11-11T05:00:00.000Z", { question: "Cricket news?" });
+  memories.save("u1", today, [claim("Kohli has 86 centuries.", "https://cricket.example/kohli")]);
+  const sessionId = store.createSession("u1", "New chat", now.toISOString());
+  const message = "What did I ask you on 3 November? Is your answer still correct today?";
+  const context = await buildContext(
+    { store, memories },
+    { userId: "u1", sessionId, message, recent: [], now, timeZone },
+  );
+  assert.deepEqual(
+    context.claims.map((c) => c.url),
+    ["https://neon.com/pricing"],
+  );
+  assert.ok(!context.text.includes("Conversations on Wed, 11 Nov 2026"));
 });

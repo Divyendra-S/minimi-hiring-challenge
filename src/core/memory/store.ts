@@ -1,7 +1,7 @@
 import type { Db } from "@/adapters/db";
 import type { SessionSummary, StoredMessage } from "@/shared/dto";
 import type { Source } from "@/shared/events";
-import { LOG_SCHEMA } from "./schema";
+import { LOG_SCHEMA, TURN_INDEX_SCHEMA } from "./schema";
 
 export type NewMessage = {
   id?: string;
@@ -16,13 +16,19 @@ export type NewMessage = {
 
 /** A message from any of the user's sessions, for recalling conversations by date. */
 export type LoggedMessage = StoredMessage & { sessionId: string; sessionTitle: string };
+/** An answer from any of the user's sessions, with the question it answered. */
+export type LoggedTurn = LoggedMessage & { question: string };
 
 type MessageRow = Omit<StoredMessage, "sources"> & { sourcesJson: string };
 type LoggedRow = Omit<LoggedMessage, "sources"> & { sourcesJson: string };
+type TurnRow = Omit<LoggedTurn, "sources"> & { sourcesJson: string };
 
 /** The message log: sessions and messages. Every query is scoped by user id. */
 export function createStore(db: Db) {
   db.exec(LOG_SCHEMA);
+  // Built once, from the messages already there, in a database made before the index existed.
+  const indexed = db.prepare("SELECT 1 FROM sqlite_master WHERE name = 'turns_fts'").get();
+  if (!indexed) db.exec(TURN_INDEX_SCHEMA);
 
   const insertSession = db.prepare(
     "INSERT INTO sessions (id, user_id, title, created_at, updated_at) VALUES (?, ?, ?, ?, ?)",
@@ -54,6 +60,23 @@ export function createStore(db: Db) {
        WHERE m.user_id = ? AND m.created_at >= ? AND m.created_at < ? AND m.session_id != ?
        ORDER BY createdAt DESC, seq DESC LIMIT ?
      ) ORDER BY createdAt, seq`,
+  );
+  // An answer with the question it answered.
+  const turnColumns = `a.id, a.role, a.content, a.sources_json AS sourcesJson,
+    a.created_at AS createdAt, a.session_id AS sessionId, s.title AS sessionTitle,
+    COALESCE((SELECT q.content FROM messages q WHERE q.session_id = a.session_id
+       AND q.role = 'user' AND q.rowid < a.rowid ORDER BY q.rowid DESC LIMIT 1), '') AS question`;
+  // `sessions` is a JSON list of session ids to look in, or null for all of them.
+  const selectTurnsMatching = db.prepare<[string, string, string, string | null, number], TurnRow>(
+    `SELECT ${turnColumns}
+     FROM turns_fts f JOIN messages a ON a.rowid = f.rowid JOIN sessions s ON s.id = a.session_id
+     WHERE turns_fts MATCH ?1 AND a.user_id = ?2 AND a.session_id != ?3
+       AND (?4 IS NULL OR a.session_id IN (SELECT value FROM json_each(?4)))
+     ORDER BY bm25(turns_fts) LIMIT ?5`,
+  );
+  const selectTurn = db.prepare<[string, string, string], TurnRow>(
+    `SELECT ${turnColumns} FROM messages a JOIN sessions s ON s.id = a.session_id
+     WHERE a.id = ? AND a.user_id = ? AND a.session_id != ?`,
   );
   const selectFirst = db.prepare<[string], { title: string; createdAt: string; count: number }>(
     `SELECT title, MIN(created_at) AS createdAt, COUNT(*) AS count FROM sessions WHERE user_id = ?`,
@@ -110,6 +133,27 @@ export function createStore(db: Db) {
       return selectBetween
         .all(userId, from.toISOString(), to.toISOString(), exceptSessionId, limit)
         .map(withSources);
+    },
+    /**
+     * The answers in the user's other sessions that match an FTS5 query best, with their
+     * questions. `inSessions` narrows the search to those sessions.
+     */
+    turnsMatching(
+      userId: string,
+      query: string,
+      exceptSessionId: string,
+      inSessions: string[] | null,
+      limit: number,
+    ): LoggedTurn[] {
+      const sessions = inSessions ? JSON.stringify(inSessions) : null;
+      return selectTurnsMatching
+        .all(query, userId, exceptSessionId, sessions, limit)
+        .map(withSources);
+    },
+    /** One answer with its question, unless it is in `exceptSessionId`. */
+    turn(userId: string, answerId: string, exceptSessionId: string): LoggedTurn | undefined {
+      const row = selectTurn.get(answerId, userId, exceptSessionId);
+      return row && withSources(row);
     },
     setTitle(userId: string, sessionId: string, title: string): void {
       updateTitle.run(title, sessionId, userId);

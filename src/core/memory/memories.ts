@@ -12,14 +12,23 @@ export type NewMemory = {
   topic: string;
   entities: string[];
   sourceUrl?: string;
+  /**
+   * What the memory is the value of, e.g. "Neon Launch plan price" or "sales team size". A newer
+   * memory with the same subject replaces it.
+   */
+  subject?: string;
 };
-export type Memory = Omit<NewMemory, "entities" | "sourceUrl"> & {
+export type Memory = Omit<NewMemory, "entities" | "sourceUrl" | "subject"> & {
   id: string;
   sourceUrl: string | null;
+  /** Normalized, so two spellings of one subject compare equal. */
+  subject: string | null;
   observedAt: string;
   /** The conversation it was learned in. */
   sessionId: string;
   sessionTitle: string;
+  /** The answer it was learned from, in the message log. */
+  answerId: string;
 };
 /** The turn a memory came from: its answer and when it happened. */
 export type Turn = { sessionId: string; answerId: string; at: string };
@@ -35,17 +44,23 @@ export function normalize(text: string): string {
     .trim();
 }
 
-const MEMORY_COLUMNS = `m.id, m.kind, m.text, m.topic, m.source_url AS sourceUrl,
-  m.observed_at AS observedAt, m.session_id AS sessionId, (SELECT title FROM sessions s WHERE s.id = m.session_id) AS sessionTitle`;
+const MEMORY_COLUMNS = `m.id, m.kind, m.text, m.topic, m.source_url AS sourceUrl, m.subject,
+  m.observed_at AS observedAt, m.session_id AS sessionId, m.message_id AS answerId, (SELECT title FROM sessions s WHERE s.id = m.session_id) AS sessionTitle`;
 
 /** Memories, the entities they mention, and their keyword index. Every query is scoped by user id. */
 export function createMemoryStore(db: Db) {
   db.exec(MEMORY_SCHEMA);
+  // A database made before memories had a subject.
+  const columns = db.prepare<[], { name: string }>("PRAGMA table_info(memories)").all();
+  if (!columns.some((column) => column.name === "subject")) {
+    db.exec("ALTER TABLE memories ADD COLUMN subject TEXT");
+  }
+  db.exec("CREATE INDEX IF NOT EXISTS memories_by_subject ON memories (user_id, subject)");
 
   // A memory is never updated: a changed price has a different hash, so it becomes a new row.
   const insertMemory = db.prepare(
-    `INSERT INTO memories (id, user_id, kind, text, topic, source_url, observed_at, session_id, message_id, hash)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT (user_id, hash) DO NOTHING`,
+    `INSERT INTO memories (id, user_id, kind, text, topic, source_url, subject, observed_at, session_id, message_id, hash)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT (user_id, hash) DO NOTHING`,
   );
   const insertFts = db.prepare(
     "INSERT INTO memories_fts (memory_id, text, topic) VALUES (?, ?, ?)",
@@ -71,7 +86,7 @@ export function createMemoryStore(db: Db) {
   );
   // The newest N memories per entity. The ids arrive as a JSON array.
   const selectLinked = db.prepare<[string, string, number], Memory>(
-    `SELECT DISTINCT id, kind, text, topic, sourceUrl, observedAt, sessionId, sessionTitle FROM (
+    `SELECT DISTINCT id, kind, text, topic, sourceUrl, subject, observedAt, sessionId, sessionTitle FROM (
        SELECT ${MEMORY_COLUMNS},
               ROW_NUMBER() OVER (PARTITION BY l.entity_id ORDER BY m.observed_at DESC) AS n
        FROM memory_entities l JOIN memories m ON m.id = l.memory_id
@@ -94,6 +109,17 @@ export function createMemoryStore(db: Db) {
     `SELECT ${MEMORY_COLUMNS} FROM memories m
      WHERE m.user_id = ? AND m.session_id IN (SELECT value FROM json_each(?))
      ORDER BY m.observed_at DESC LIMIT ?`,
+  );
+
+  // Every value a subject has had. The subjects arrive as a JSON array.
+  const selectHistory = db.prepare<[string, string], Memory>(
+    `SELECT ${MEMORY_COLUMNS} FROM memories m
+     WHERE m.user_id = ? AND m.subject IN (SELECT value FROM json_each(?))
+     ORDER BY m.observed_at`,
+  );
+  const selectSubjects = db.prepare<[string, number], { subject: string }>(
+    `SELECT subject FROM memories WHERE user_id = ? AND subject IS NOT NULL
+     GROUP BY subject ORDER BY MAX(observed_at) DESC LIMIT ?`,
   );
 
   const selectUnembedded = db.prepare<[string], { id: string; text: string; topic: string }>(
@@ -132,6 +158,7 @@ export function createMemoryStore(db: Db) {
         memory.text,
         memory.topic,
         memory.sourceUrl ?? null,
+        (memory.subject && normalize(memory.subject)) || null,
         turn.at,
         turn.sessionId,
         turn.answerId,
@@ -175,6 +202,15 @@ export function createMemoryStore(db: Db) {
     fromSessions(userId: string, sessionIds: string[], limit: number): Memory[] {
       if (sessionIds.length === 0) return [];
       return selectFromSessions.all(userId, JSON.stringify(sessionIds), limit);
+    },
+    /** Every memory about these subjects, oldest first: the last one of a subject is current. */
+    historyOf(userId: string, subjects: string[]): Memory[] {
+      if (subjects.length === 0) return [];
+      return selectHistory.all(userId, JSON.stringify(subjects));
+    },
+    /** The subjects in use, most recently used first. */
+    subjects(userId: string, limit: number): string[] {
+      return selectSubjects.all(userId, limit).map((row) => row.subject);
     },
     /** Memories with no embedding yet. */
     unembedded(userId: string): { id: string; text: string; topic: string }[] {

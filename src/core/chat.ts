@@ -1,8 +1,10 @@
 import type { ChatCompletionMessageParam } from "openai/resources/chat/completions";
+import type { Read } from "@/adapters/tavily";
 import type { StoredMessage } from "@/shared/dto";
 import type { ChatEvent, Source, Timings } from "@/shared/events";
 import { type AgentDeps, runAgent } from "./agent/loop";
 import { SYSTEM_PROMPT, withContext } from "./agent/prompt";
+import { asksIfStillTrue, recheck } from "./agent/recheck";
 import { buildContext, type ContextDeps } from "./memory/context";
 
 // Older context comes from memory, not from replaying the whole session.
@@ -10,7 +12,7 @@ const HISTORY_MESSAGES = 20;
 // Enough to resolve "them" or "it" in a follow-up.
 const RECENT_MESSAGES = 4;
 
-export type ChatDeps = AgentDeps & ContextDeps & { now: () => Date };
+export type ChatDeps = AgentDeps & ContextDeps & { read: Read; now: () => Date };
 export type ChatInput = { userId: string; sessionId?: string; message: string; timezone: string };
 
 /**
@@ -51,13 +53,23 @@ export async function* chat(
   const answerId = crypto.randomUUID();
   yield { type: "start", sessionId, questionId, answerId };
 
+  // "Has it changed since?" about remembered facts: their sources are known, so code fetches
+  // them now, and the model compares old and new in one call instead of two.
+  const cited: Source[] = [];
+  let pages: string | undefined;
+  if (context.claims.length > 0 && asksIfStillTrue(input.message)) {
+    yield { type: "searching", queries: context.claims.map((claim) => withoutScheme(claim.url)) };
+    pages = await recheck(deps.read, context.claims, cited, signal);
+    if (pages) yield { type: "sources", sources: [...cited] };
+  }
+
   const messages: ChatCompletionMessageParam[] = [
     { role: "system", content: SYSTEM_PROMPT },
     ...history.map(toModelMessage),
-    { role: "user", content: withContext(input.message, context) },
+    { role: "user", content: withContext(input.message, context.text, pages) },
   ];
   let text = "";
-  let sources: Source[] = [];
+  let sources: Source[] = [...cited];
   let firstTokenMs: number | null = null;
   const timings = (): Timings => ({ firstTokenMs, totalMs: elapsed(started) });
   let saved = false; // a Stop can land just as the answer completes; save it only once
@@ -82,7 +94,7 @@ export async function* chat(
   signal?.addEventListener("abort", stop, { once: true });
 
   try {
-    for await (const event of runAgent(deps, messages, signal)) {
+    for await (const event of runAgent(deps, messages, signal, cited)) {
       if (event.type === "delta") {
         firstTokenMs ??= elapsed(started);
         text += event.text;
@@ -113,6 +125,10 @@ function toModelMessage(message: StoredMessage): ChatCompletionMessageParam {
     role: "assistant",
     content: sources ? `${message.content}\n\nSources:\n${sources}` : message.content,
   };
+}
+
+function withoutScheme(url: string): string {
+  return url.replace(/^https?:\/\/(www\.)?/, "");
 }
 
 function titleFrom(message: string): string {

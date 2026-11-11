@@ -2,20 +2,31 @@ import type { Embedder } from "@/adapters/embedder";
 import type { StoredMessage } from "@/shared/dto";
 import { type DayRange, formatDay, mentionedDates } from "./dates";
 import { type Memory, type MemoryStore, normalize } from "./memories";
-import type { LoggedMessage, Store } from "./store";
+import type { LoggedMessage, LoggedTurn, Store } from "./store";
 
-const MESSAGES_PER_RANGE = 40;
+// A day or two is quoted in full. A longer stretch (a busy week, a month) would be thousands of
+// words, so it is shown as the user's questions only, and past the second limit as the first
+// question of each conversation. The facts in the answers still arrive, as saved memories.
+const MESSAGES_QUOTED_IN_FULL = 40;
+const MESSAGES_QUOTED_AS_QUESTIONS = 160;
+const MESSAGES_PER_RANGE = 600;
 const QUESTION_CHARS = 500;
+const SHORT_QUESTION_CHARS = 160;
 const ANSWER_CHARS = 400;
+// Past answers quoted whole: the one the best memory was learned from, and the best keyword
+// matches in the log itself. Advice such as directions or an agenda leaves no saved memory, and
+// a dated answer above is cut short.
+const TURNS_QUOTED = 3;
+const TURN_CHARS = 1_500;
 // Memories of the conversations a date points to: those answers are quoted cut short.
-const MEMORIES_FROM_DATES = 16;
-const KEYWORD_MATCHES = 12;
+const MEMORIES_FROM_DATES = 60;
+const KEYWORD_MATCHES = 24;
 // By meaning: the closest few, and only if they are close at all. Below this cosine similarity,
 // the sample history's matches were unrelated ("Thanks!" scores 0.18 against its nearest memory).
-const NEAREST = 8;
+const NEAREST = 12;
 const MIN_SIMILARITY = 0.25;
 const MEMORIES_PER_ENTITY = 5;
-const MAX_MEMORIES = 24;
+const MAX_MEMORIES = 40;
 // How much each way of finding a memory counts when the lists are merged. A day the user named
 // is the strongest signal; a memory that only shares a product with another find is the weakest.
 const WEIGHTS = { date: 3, keyword: 1, meaning: 1, named: 1, related: 0.5 };
@@ -26,6 +37,8 @@ const MEMORIES_PER_CONVERSATION = 12;
 // The usual constant of reciprocal rank fusion: it flattens the gap between ranks 1 and 2.
 const RRF_K = 60;
 const RECENT_SESSIONS = 20;
+// Pages worth fetching again when the user asks whether remembered facts still hold.
+const SOURCES_TO_CHECK = 5;
 
 // Words that would match almost every memory.
 const STOPWORDS = new Set(
@@ -56,6 +69,12 @@ export type ContextInput = {
   timeZone: string;
 };
 
+export type Context = {
+  text: string;
+  /** The recalled claims that still stand and have a source, the most relevant first. */
+  claims: { text: string; url: string }[];
+};
+
 /**
  * What the agent knows beyond this session, built in code on every turn with no call to a
  * language model: conversations on the days the message mentions, saved memories from them and
@@ -63,16 +82,19 @@ export type ContextInput = {
  * conversations. An empty section says so, so the
  * model can tell "nothing happened" apart from "not shown".
  */
-export async function buildContext(deps: ContextDeps, input: ContextInput): Promise<string> {
+export async function buildContext(deps: ContextDeps, input: ContextInput): Promise<Context> {
   const dates = datesSection(deps.store, input);
   const meaning = await deps.embedder?.embedIfReady(input.message);
-  return [
+  const memories = memoriesSection(deps.memories, input, dates.sessionIds, meaning);
+  const text = [
     `Now: ${formatNow(input.now, input.timeZone)}`,
     ...dates.lines,
-    memoriesSection(deps.memories, input, dates.sessionIds, meaning),
+    memories.text,
+    ...turnsSection(deps.store, input, dates.sessionIds, memories.answerId),
     sessionsSection(deps.store, input),
     ...dates.notes,
   ].join("\n\n");
+  return { text, claims: memories.claims };
 }
 
 function datesSection(store: Store, input: ContextInput) {
@@ -96,7 +118,9 @@ function datesSection(store: Store, input: ContextInput) {
           `Note: ${range.label} has ${titles.length} separate conversations: ${titles.join(", ")}. ` +
             "If the user asks what they asked or discussed that day, begin the answer with one " +
             `sentence that names all ${titles.length}, before any detail or checking. If they ` +
-            "name a topic, use only the one that matches.",
+            "also ask whether an answer is still correct, the second sentence is the verdict: " +
+            "yes, no or partly, and what changed. If they name a topic, use only the one that " +
+            "matches.",
         );
       }
       return [{ range, messages }];
@@ -134,18 +158,65 @@ function conversationsOn(range: DayRange, messages: LoggedMessage[], timeZone: s
   for (const message of messages) {
     bySession.set(message.sessionId, [...(bySession.get(message.sessionId) ?? []), message]);
   }
-  const blocks = [...bySession.values()].map((session) => {
+  const sessions = [...bySession.values()];
+  if (messages.length > MESSAGES_QUOTED_IN_FULL) {
+    const firstOnly = messages.length > MESSAGES_QUOTED_AS_QUESTIONS;
+    const blocks = sessions.map((session) => {
+      const asked = session.filter((m) => m.role === "user");
+      const lines = (firstOnly ? asked.slice(0, 1) : asked).map(
+        (m) => `  User: ${cut(m.content, SHORT_QUESTION_CHARS)}`,
+      );
+      if (firstOnly && asked.length > 1) lines.push(`  (and ${asked.length - 1} more questions)`);
+      const day = formatDay(new Date(session[0]?.createdAt ?? range.from), timeZone);
+      return [`- ${day}, "${session[0]?.sessionTitle}"`, ...lines].join("\n");
+    });
+    const what = firstOnly ? "the first question of each" : "the user's questions only";
+    return [`${heading} (${sessions.length} conversations; ${what}):`, ...blocks].join("\n");
+  }
+  const blocks = sessions.map((session) => {
     const lines = session.map((m) => {
       const time = formatTime(m.createdAt, timeZone);
       if (m.role === "user") return `  ${time} User: ${cut(m.content, QUESTION_CHARS)}`;
-      // Old citation numbers would clash with this turn's, so list the pages instead.
-      const answer = cut(m.content.replace(/\s*\[\d+\]/g, ""), ANSWER_CHARS);
-      const pages = m.sources.map((s) => s.url).join(", ");
-      return `  ${time} You: ${answer}${pages ? `\n  Pages cited: ${pages}` : ""}`;
+      return `  ${time} You: ${quoted(m, ANSWER_CHARS)}`;
     });
     return [`- "${session[0]?.sessionTitle}"`, ...lines].join("\n");
   });
   return [`${heading}:`, ...blocks].join("\n");
+}
+
+/** A past answer, cut to `max`. Its citation numbers would clash with this turn's, so the pages are listed instead. */
+function quoted(answer: LoggedMessage, max: number): string {
+  const pages = answer.sources.map((s) => s.url).join(", ");
+  const text = cut(answer.content.replace(/\s*\[\d+\]/g, ""), max);
+  return `${text}${pages ? `\n  Pages cited: ${pages}` : ""}`;
+}
+
+/**
+ * Past answers in full: the one the best memory came from (found by meaning as well as by
+ * keyword), then the ones that share the most telling words with the message. When the message
+ * names days that have conversations, only those are searched by keyword.
+ */
+function turnsSection(
+  store: Store,
+  input: ContextInput,
+  sessionIds: string[],
+  answerId: string | undefined,
+): string[] {
+  const { userId, sessionId, message, timeZone } = input;
+  const query = keywordQuery(message);
+  const within = sessionIds.length ? sessionIds : null;
+  const found = [
+    ...(answerId ? [store.turn(userId, answerId, sessionId)] : []),
+    ...(query ? store.turnsMatching(userId, query, sessionId, within, TURNS_QUOTED) : []),
+  ].flatMap((turn) => turn ?? []);
+  const turns = [...new Map(found.map((turn) => [turn.id, turn])).values()].slice(0, TURNS_QUOTED);
+  if (turns.length === 0) return [];
+  const blocks = turns.map((turn: LoggedTurn) => {
+    const asked = cut(turn.question, QUESTION_CHARS);
+    const day = formatDay(new Date(turn.createdAt), timeZone);
+    return `- ${day}, in "${turn.sessionTitle}"\n  User: ${asked}\n  You: ${quoted(turn, TURN_CHARS)}`;
+  });
+  return [["Earlier answers in full (some may be off topic):", ...blocks].join("\n")];
 }
 
 function memoriesSection(
@@ -177,17 +248,54 @@ function memoriesSection(
     CONVERSATIONS_TO_COMPLETE,
   );
   const rest = memories.fromSessions(userId, conversations, MEMORIES_PER_CONVERSATION * 2);
-  const found = fuse([...ranked, { list: rest, weight: WEIGHTS.related }])
-    .slice(0, MAX_MEMORIES)
-    .sort((a, b) => a.observedAt.localeCompare(b.observedAt));
+  const best = fuse([...ranked, { list: rest, weight: WEIGHTS.related }]).slice(0, MAX_MEMORIES);
+  if (best.length === 0) {
+    return { text: "Saved memories: none match this message.", claims: [], answerId: undefined };
+  }
 
-  if (found.length === 0) return "Saved memories: none match this message.";
-  const lines = found.map((m) => {
-    const source = m.sourceUrl ? ` (source: ${m.sourceUrl})` : "";
-    const day = formatDay(new Date(m.observedAt), timeZone);
-    return `- ${day}, in "${m.sessionTitle}", ${m.kind}: ${m.text}${source}`;
-  });
-  return ["Saved memories that may be relevant (oldest first):", ...lines].join("\n");
+  // A price, a team size or a choice can be replaced by a newer memory about the same subject.
+  // Every value the subject has had is shown, and code says which one stands: the model is not
+  // left to work that out from the dates.
+  const history = memories.historyOf(userId, [...new Set(best.flatMap((m) => m.subject ?? []))]);
+  const current = new Map(history.map((m) => [m.subject, m]));
+  const replacedBy = (m: Memory) => {
+    const newer = m.subject ? current.get(m.subject) : undefined;
+    return newer && newer.id !== m.id ? newer : undefined;
+  };
+  const shown = [...new Map([...best, ...history].map((m) => [m.id, m])).values()];
+  const day = (m: Memory) => formatDay(new Date(m.observedAt), timeZone);
+  const lines = shown
+    .sort((a, b) => a.observedAt.localeCompare(b.observedAt))
+    .map((m) => {
+      const source = m.sourceUrl ? ` (source: ${m.sourceUrl})` : "";
+      const newer = replacedBy(m);
+      const isNewest = !newer && history.some((h) => h.subject === m.subject && h.id !== m.id);
+      const status = newer ? ` [replaced on ${day(newer)}]` : isNewest ? " [current]" : "";
+      return `- ${day(m)}, in "${m.sessionTitle}", ${m.kind}: ${m.text}${source}${status}`;
+    });
+  // The pages worth fetching again are those of the claims the message points at surely: on a
+  // day it names or about a product it names, and found in a second way too (a keyword, its
+  // meaning). When it names a day and no topic, all of that day's claims are taken. Without a
+  // day or a product, nothing is fetched and the model searches for itself. Seen live: asked
+  // about "that db thing" with four database chats, code picked one, and the answer covered
+  // only that one.
+  const among = (list: Memory[]) => (m: Memory) => list.some((x) => x.id === m.id);
+  const ways = (m: Memory) =>
+    [byDate, byKeyword, byMeaning, named].filter((list) => among(list)(m)).length;
+  const claims = best.filter((m) => m.sourceUrl);
+  const sure = claims.filter((m) => ways(m) >= 2);
+  const picked = [
+    sure.filter(among(byDate)),
+    sure.filter(among(named)),
+    claims.filter(among(byDate)),
+  ].find((list) => list.length);
+  const standing = (picked ?? []).map((m) => replacedBy(m) ?? m);
+  const byUrl = new Map(standing.flatMap((m) => (m.sourceUrl ? [[m.sourceUrl, m.text]] : [])));
+  return {
+    text: ["Saved memories that may be relevant (oldest first):", ...lines].join("\n"),
+    claims: [...byUrl].slice(0, SOURCES_TO_CHECK).map(([url, text]) => ({ url, text })),
+    answerId: best[0]?.answerId,
+  };
 }
 
 function sessionsSection(store: Store, input: ContextInput): string {

@@ -1,7 +1,7 @@
 import type { ChatCompletionMessageToolCall } from "openai/resources/chat/completions";
 import { openDb } from "@/adapters/db";
 import type { Llm, LlmReply, LlmRequest } from "@/adapters/llm";
-import type { Search } from "@/adapters/tavily";
+import type { Read, Search } from "@/adapters/tavily";
 import { createMemoryStore, type Turn } from "@/core/memory/memories";
 import { createStore, type Store } from "@/core/memory/store";
 import type { ChatEvent, Source } from "@/shared/events";
@@ -56,6 +56,14 @@ export const fakeSearch: Search = async (query) => [
   { title: `About ${query}`, url: `https://example.com/${query}`, content: `Facts about ${query}` },
   { title: "Shared page", url: "https://example.com/shared", content: "Shared facts" },
 ];
+
+/** Every page is fetched, and says which page it is. */
+export const fakeRead: Read = async (urls) =>
+  urls.map((url) => ({
+    title: url.replace("https://", ""),
+    url,
+    content: `The page at ${url} now`,
+  }));
 
 export async function drain<E>(gen: AsyncGenerator<E>): Promise<{ events: E[] }> {
   const events: E[] = [];

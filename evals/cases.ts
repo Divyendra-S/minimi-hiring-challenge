@@ -4,8 +4,8 @@
 //   Tue 3 Nov 20:15   Postgres hosting (already Wed 4 Nov in UTC)
 //   Mon 9 Nov 10:30   CRM shortlist: five tools for a 20-person sales team (2 turns)
 //
-// "long" history is all 31 sample chats (src/core/memory/demo-chats.ts), from 16 Sep to 10 Nov:
-// the three above among look-alikes, with a price, a team size and a decision that change.
+// "long" history is all 47 sample chats (src/core/memory/demo-chats.ts), 191 turns from 16 Sep to
+// 10 Nov: the three above among look-alikes, with prices, a team size and decisions that change.
 //
 // `context` is checked on every run, offline: it is what the read path puts in front of the model.
 // `answer` is checked on live runs only: what the model did with it.
@@ -29,6 +29,8 @@ export const GROUPS = {
   m: "Long: things that never were",
   v: "Long: vague and sloppy questions",
   x: "Long: hard, several steps at once",
+  y: "Long: later turns, replaced values, re-checks",
+  z: "Long: a detail deep in a long answer",
 } as const;
 
 export type EvalCase = {
@@ -38,7 +40,11 @@ export type EvalCase = {
   /** Earlier turns of the same chat. */
   earlier?: { question: string; answer: string }[];
   message: string;
-  context: { has?: string[]; lacks?: string[] };
+  /**
+   * `rechecks`: domains whose pages code must fetch before the model runs, because the message
+   * asks whether remembered facts still hold. An empty list means it must fetch nothing.
+   */
+  context: { has?: string[]; lacks?: string[]; rechecks?: string[] };
   /**
    * `search`: whether it should search (unset: either is fine). An answer that searched must
    * also cite. `official`: domains it must cite a page of, i.e. it went to the source.
@@ -54,6 +60,8 @@ const BRIEF_NOV_3 = "What did I ask you on 3 November? Is your answer still corr
 const BRIEF_POSTGRES =
   "Last Tuesday I asked you about Postgres hosting. Has any pricing changed since then?";
 
+// How the context says it read a date phrase: "last Tuesday" means Tue, 3 Nov 2026.
+const DATE_READ = '" means ';
 const NO_RECORD =
   /no record|don['’]t have (a |any )?(record|earlier|previous|saved)|no (earlier|previous|past|prior) (conversation|chat)|(can['’]t|couldn['’]t|don['’]t) (find|see)/i;
 const NOV_3 = /\b3 Nov|Nov(ember)? 3\b/i;
@@ -112,10 +120,9 @@ export const CASES: EvalCase[] = [
     history: "empty",
     message: BRIEF_NOV_3,
     context: {
-      has: [
-        "Conversations on Tue, 3 Nov 2026, apart from this one: none.",
-        "Conversations on Wed, 11 Nov 2026, apart from this one: none.",
-      ],
+      has: ["Conversations on Tue, 3 Nov 2026, apart from this one: none."],
+      // "today" is when to compare, not a day to recall.
+      lacks: ["Conversations on Wed, 11 Nov 2026"],
     },
     answer: { has: [NO_RECORD] },
   },
@@ -177,7 +184,7 @@ export const CASES: EvalCase[] = [
     message: "Remind me what you told me about Supabase's pricing.",
     context: {
       has: ["Saved memories: none match this message.", "Earlier conversations: none."],
-      lacks: [" means "],
+      lacks: [DATE_READ],
     },
     answer: { has: [NO_RECORD] },
   },
@@ -288,21 +295,21 @@ export const CASES: EvalCase[] = [
     id: "d1",
     history: "empty",
     message: "What's the latest LTS version of Node.js?",
-    context: { has: ["Saved memories: none match this message."], lacks: [" means "] },
+    context: { has: ["Saved memories: none match this message."], lacks: [DATE_READ] },
     answer: { search: true },
   },
   {
     id: "d2",
     history: "empty",
     message: "How much does GitHub Copilot Business cost per user per month?",
-    context: { lacks: [" means "] },
+    context: { lacks: [DATE_READ] },
     answer: { search: true },
   },
   {
     id: "d3",
     history: "empty",
     message: "What's new in PostgreSQL 18?",
-    context: { lacks: [" means "] }, // "18" is a version, not a date
+    context: { lacks: [DATE_READ] }, // "18" is a version, not a date
     answer: { search: true },
   },
 
@@ -310,21 +317,21 @@ export const CASES: EvalCase[] = [
     id: "e1",
     history: "demo",
     message: "Thanks, that was really helpful!",
-    context: { has: ["Saved memories: none match this message."], lacks: [" means "] },
+    context: { has: ["Saved memories: none match this message."], lacks: [DATE_READ] },
     answer: { search: false },
   },
   {
     id: "e2",
     history: "empty",
     message: "Rewrite this to sound friendlier: send me the report now.",
-    context: { lacks: [" means "] }, // "now" is not a past date
+    context: { lacks: [DATE_READ] }, // "now" is not a past date
     answer: { search: false },
   },
   {
     id: "e3",
     history: "empty",
     message: "Explain what a foreign key is, in one sentence.",
-    context: { lacks: [" means "] },
+    context: { lacks: [DATE_READ] },
     answer: { search: false },
   },
 
@@ -427,6 +434,8 @@ export const CASES: EvalCase[] = [
     // The team has grown since.
     context: {
       has: [CRM, ...CRM_CLAIMS, TEAM_25],
+      // Code fetches the five pricing pages before the model runs.
+      rechecks: ["freshworks.com", "hubspot.com", "zoho.com", "salesforce.com", "pipedrive.com"],
     },
     answer: { official: ["hubspot.com", "pipedrive.com"], has: FIVE_CRMS },
   },
@@ -435,7 +444,10 @@ export const CASES: EvalCase[] = [
     history: "long",
     message: BRIEF_NOV_3,
     // Two chats that day; and Neon's price was already seen to change three days later.
-    context: { has: [POSTGRES, MARATHON_PLAN, NEON, SUPABASE, RAILWAY, NEON_NOW] },
+    context: {
+      has: [POSTGRES, MARATHON_PLAN, NEON, SUPABASE, RAILWAY, NEON_NOW],
+      rechecks: ["neon.com", "supabase.com", "railway.com"],
+    },
     answer: { official: ["neon.com"], has: [/Postgres|Neon/, /marathon/i] },
   },
   {
@@ -461,7 +473,7 @@ export const CASES: EvalCase[] = [
     id: "h1",
     history: "long",
     message: "Which password manager did we pick for the company?",
-    context: { has: [BITWARDEN] },
+    context: { has: [BITWARDEN], rechecks: [] },
     answer: { search: false, has: [/Bitwarden/] },
   },
   {
@@ -802,7 +814,9 @@ export const CASES: EvalCase[] = [
     message: "that db thing i asked abt, is it still same price??",
     // Five chats were about databases. The one the user ended up on is a fair reading, as long
     // as the answer says which one it took.
-    context: { has: [NEON, NEON_NOW] },
+    // Code must not pick one of them and fetch its page: seen live, the answer then covered
+    // only that one.
+    context: { has: [NEON, NEON_NOW], rechecks: [] },
     answer: { search: true, has: [/Neon/] },
   },
   {
@@ -1079,5 +1093,264 @@ export const CASES: EvalCase[] = [
     message: "ok and supabase?",
     context: { has: [SUPABASE] },
     answer: { has: [/\$25/] },
+  },
+  // --- The longer history: facts from the third or fourth turn of a chat, values that a later
+  // chat replaced, and the pages code fetches before the model runs.
+  {
+    id: "y1",
+    history: "long",
+    message: "What did I decide about the standing desk?",
+    context: { has: ["The user decided to buy the Flexispot E7 standing desk."], rechecks: [] },
+    answer: { search: false, has: [/Flexispot/] },
+  },
+  {
+    id: "y2",
+    history: "long",
+    message: "Which microphones did I buy for the podcast?",
+    context: { has: ["The user decided to buy two Rode PodMic USB microphones for the podcast."] },
+    answer: { search: false, has: [/Rode/] },
+  },
+  {
+    id: "y3",
+    history: "long",
+    message: "what day is the sales offsite",
+    context: { has: ["The sales offsite is planned for Friday 22 January 2027."] },
+    answer: { search: false, has: [/22 Jan|Jan(uary)? 22/] },
+  },
+  {
+    id: "y4",
+    history: "long",
+    message: "How old is my daughter?",
+    context: { has: ["The user's daughter is 9 years old."] },
+    answer: { search: false, has: [/\b(9|nine)\b/] },
+  },
+  {
+    id: "y5",
+    history: "long",
+    message: "What analytics does the side project use?",
+    context: {
+      has: [
+        "from Plausible to PostHog's free tier. [current]",
+        "decided to use Plausible for the side project's analytics. [replaced on Wed, 4 Nov 2026]",
+      ],
+    },
+    answer: { search: false, has: [/PostHog/] },
+  },
+  {
+    id: "y6",
+    history: "long",
+    message: "What was the last price you gave me for Pipedrive?",
+    context: {
+      has: [
+        "now costs $39 per user per month, billed annually. (source: https://www.pipedrive.com/en/pricing) [current]",
+        "costs $34 per user per month, billed annually. (source: https://www.pipedrive.com/en/pricing) [replaced on Tue, 10 Nov 2026]",
+      ],
+      rechecks: [],
+    },
+    answer: { search: false, has: [/\$39/] },
+  },
+  {
+    id: "y7",
+    history: "long",
+    message: "Which days can't I run?",
+    context: { has: ["The user cannot run on Wednesdays."] },
+    answer: { search: false, has: [/Wednesday/] },
+  },
+  {
+    id: "y8",
+    history: "long",
+    message: "What's my time goal for the race?",
+    context: { has: ["The user's goal is to finish the marathon in under 4 hours 30 minutes."] },
+    answer: { search: false, has: [/4:30|4 hours 30|4h ?30|four and a half/i] },
+  },
+  {
+    id: "y9",
+    history: "long",
+    message: "How much is the offsite budget, and how many of us are going?",
+    context: { has: ["The budget for the sales offsite is $4,000."] },
+    answer: { search: false, has: [/4,?000/] },
+  },
+  {
+    id: "y10",
+    history: "long",
+    message: "Is there any food I told you I don't like?",
+    context: { has: ["The user does not like mushrooms."] },
+    answer: { search: false, has: [/mushroom/i] },
+  },
+  {
+    id: "y11",
+    history: "long",
+    message: "Which e-signature tool did we pick, and what does it cost per user?",
+    context: {
+      has: [
+        "The user's company decided to use PandaDoc for sales contracts.",
+        "PandaDoc Starter costs $19 per user per month.",
+      ],
+    },
+    answer: { search: false, has: [/PandaDoc/, /\$19/] },
+  },
+  {
+    id: "y12",
+    history: "long",
+    message: "When is dad's birthday and what am I getting him?",
+    context: {
+      has: [
+        "The user's father turns 60 on 22 November and reads a lot.",
+        "The user decided to give their father a Kindle Paperwhite for his 60th birthday.",
+      ],
+    },
+    answer: { search: false, has: [/22 Nov|Nov(ember)? 22/, /Kindle/] },
+  },
+  {
+    id: "y13",
+    history: "long",
+    // No word in common with the memory.
+    message: "Who are our customers?",
+    context: { has: ["The user's company sells scheduling software to dental clinics."] },
+    answer: { search: false, has: [/dental/i] },
+  },
+  {
+    id: "y14",
+    history: "long",
+    message: "What did I ask you on 20 October?",
+    // Two chats of four and five turns: the later questions are quoted too.
+    context: {
+      has: [
+        "Help me plan Q1 quotas.",
+        "What does a read replica add on RDS?",
+        "What attainment should I expect?",
+      ],
+      rechecks: [],
+    },
+    answer: { search: false, has: [/quota/i, /Postgres|RDS/] },
+  },
+  {
+    id: "y15",
+    history: "long",
+    message: "Did Pipedrive's price change since Monday?",
+    context: { has: ["[replaced on Tue, 10 Nov 2026]"], rechecks: ["pipedrive.com"] },
+    answer: { search: true, has: [/\$34/, /\$39/] },
+  },
+  {
+    id: "y16",
+    history: "long",
+    message: "How do I back up the side project's database?",
+    context: {
+      has: [
+        "The user decided to back up the side project's database every night with pg_dump to Cloudflare R2.",
+      ],
+    },
+    answer: { search: false, has: [/R2/] },
+  },
+  {
+    id: "y17",
+    history: "long",
+    message: "What's the quota per AE?",
+    context: { has: ["The annual quota per account executive is $600,000."] },
+    answer: { search: false, has: [/600,?000|600k/i] },
+  },
+  {
+    id: "y18",
+    history: "long",
+    message: "how tall am i",
+    context: { has: ["The user is 190 cm tall."] },
+    answer: { search: false, has: [/190/] },
+  },
+  {
+    id: "y19",
+    history: "long",
+    message: "Are we staying on Slack?",
+    context: {
+      has: ["The user's company decided to stay on Slack and not move to Microsoft Teams."],
+      rechecks: [],
+    },
+    answer: { search: false, has: [/Slack/] },
+  },
+  {
+    id: "y20",
+    history: "long",
+    message: "Is Slack Pro still $8.75 a user?",
+    context: { has: ["Slack Pro costs $8.75 per user per month"], rechecks: ["slack.com"] },
+    answer: { search: true, official: ["slack.com"], has: [/8\.75/] },
+  },
+  {
+    id: "y21",
+    history: "long",
+    message: "What did I ask you on Saturday?",
+    context: {
+      has: ["Suggest an easy day hike within an hour of Austin.", "Will my Vercel bill jump?"],
+    },
+    answer: { search: false, has: [/hike|Pedernales/i, /Vercel/] },
+  },
+  {
+    id: "y22",
+    history: "long",
+    message: "Where else are we going on the Portugal trip, besides Lisbon?",
+    context: {
+      has: [
+        "The user decided to add one night in Porto and a day trip to Sintra to the Lisbon trip.",
+      ],
+    },
+    answer: { search: false, has: [/Porto/, /Sintra/] },
+  },
+  // Advice that no saved memory holds (directions, an agenda, a recipe), or that sits past the
+  // point where a quoted answer is cut. It has to come from the message log itself.
+  {
+    id: "z1",
+    history: "long",
+    message: "How do we get to Sintra again?",
+    context: { has: ["book Pena Palace online in advance"] },
+    answer: { search: false, has: [/Rossio/, /Pena/] },
+  },
+  {
+    id: "z2",
+    history: "long",
+    message: "what was the rough agenda you gave me for the offsite?",
+    context: { has: ["a hard stop at 18:00"] },
+    answer: { search: false, has: [/18:00|6 ?pm/i] },
+  },
+  {
+    id: "z3",
+    history: "long",
+    message: "What pace did you say for my long runs?",
+    context: { has: ["multiply it by about 4.7"] },
+    answer: { search: false, has: [/easy|slower|conversation/i] },
+  },
+  {
+    id: "z4",
+    history: "long",
+    message: "remind me how to do the restore test for the backups",
+    context: { has: ["Run pg_restore into it."] },
+    answer: { search: false, has: [/pg_restore/] },
+  },
+  {
+    id: "z5",
+    history: "long",
+    message: "How many portions of the dal were for the freezer?",
+    context: { has: ["Two portions in the freezer"] },
+    answer: { search: false, has: [/two|2/i] },
+  },
+  {
+    id: "z6",
+    history: "long",
+    message:
+      "On 10 October you told me how long the standing desk warranty is. What isn't covered?",
+    context: { has: ["damage from overloading are not covered"] },
+    answer: { search: false, has: [/overload|wear|scratch/i] },
+  },
+  {
+    id: "z7",
+    history: "long",
+    message: "what should I book first for the Portugal trip, and when?",
+    // No keyword in common with the chat ("Portugal"): found through a memory, by meaning.
+    context: { has: ["Booking two to three months ahead is usually the best time"] },
+    answer: { search: false, has: [/flight/i, /December|January/] },
+  },
+  {
+    id: "z8",
+    history: "long",
+    message: "Which presets did you suggest for the desk height?",
+    context: { has: ["78 cm for sitting and 118 cm for standing"] },
+    answer: { search: false, has: [/78/, /118/] },
   },
 ];

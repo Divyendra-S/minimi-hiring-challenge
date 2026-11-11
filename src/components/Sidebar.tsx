@@ -92,7 +92,7 @@ export function Sidebar({ selectedId, onSelect, open, onClose }: Props) {
             <p className="mt-1 text-[12px] leading-snug text-pretty text-text-tertiary">
               {loadDemo.isError
                 ? loadDemo.error.message
-                : "Add 31 demo chats from the past eight weeks, then ask about them."}
+                : "Add 47 demo chats from the past eight weeks, then ask about them."}
             </p>
             <button
               type="button"
