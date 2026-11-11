@@ -19,7 +19,7 @@ after the reply ─► one extraction call ─► memories ─► local embeddin
 **Reading memory** (`src/core/memory/context.ts`, no model call):
 
 1. **Dates.** "last Tuesday", "3 November" or "two Mondays ago" become day ranges in the user's time zone, and those days' conversations are quoted. If a phrase could mean two days, both are shown and the better match is named.
-2. **Memories**, found five ways: by that date, by keyword (SQLite FTS5, BM25), by meaning (a 23 MB embedding model running in-process), by product name, and one hop further (what else is known about those products, such as a newer price).
+2. **Memories**, found five ways: by that date, by keyword (SQLite FTS5, BM25), by meaning (a 23 MB embedding model running in-process), by entity (each memory is linked to the products, companies and people it mentions), and one hop along those links (what else is known about the entities found, such as a newer price).
 3. **Merge.** Reciprocal rank fusion, capped at 24 lines. Each line carries its date, conversation, kind and source URL.
 4. **Honesty.** An empty section says "none", so "what did I ask on 3 November?" on a fresh install gets "I have no record", not an invention.
 
@@ -45,16 +45,17 @@ Each live case ran once, on cases I wrote; a pass is one good answer, not a guar
 
 ## Decisions, with the evidence
 
-| Considered                                                          | Decision               | Why                                                                                         |
-| ------------------------------------------------------------------- | ---------------------- | ------------------------------------------------------------------------------------------- |
-| A memory tool the model calls                                       | Rejected               | One more model round (about 2 s) on the questions the brief asks most                       |
-| A model that rewrites the query for recall                          | Rejected               | A serial call on every turn; recall in code already passes 113 of 113                       |
-| Vector database                                                     | Rejected               | A user's vectors are compared in about 1 ms per thousand in plain code                      |
-| Embedding API                                                       | Rejected               | A third key and a network call per turn; the local model takes 2 ms                         |
-| Planner, researcher and writer agents                               | Rejected               | More serial calls and more ways to fail                                                     |
-| Faster model settings: no reasoning, priority tier, latency routing | Rejected               | Measured: all within run-to-run noise                                                       |
-| `better-sqlite3`                                                    | Replaced by `libsql`   | Its current release crashes on Node 20; tested from a clean copy                            |
-| Rules in the system prompt only                                     | Moved next to the data | The model ignored them; a note at the end of the context and of the search results fixed it |
+| Considered                                                          | Decision               | Why                                                                                                                        |
+| ------------------------------------------------------------------- | ---------------------- | -------------------------------------------------------------------------------------------------------------------------- |
+| A memory tool the model calls                                       | Rejected               | One more model round (about 2 s) on the questions the brief asks most                                                      |
+| A model that rewrites the query for recall                          | Rejected               | A serial call on every turn; recall in code already passes 113 of 113                                                      |
+| Vector database                                                     | Rejected               | A user's vectors are compared in about 1 ms per thousand in plain code                                                     |
+| Embedding API                                                       | Rejected               | A third key and a network call per turn; the local model takes 2 ms                                                        |
+| Planner, researcher and writer agents                               | Rejected               | More serial calls and more ways to fail                                                                                    |
+| Knowledge graph: typed relations, multi-hop traversal               | Partly                 | Entities and one hop are built. Walking deeper needs a memory tool and a model round per level, and no test case needed it |
+| Faster model settings: no reasoning, priority tier, latency routing | Rejected               | Measured: all within run-to-run noise                                                                                      |
+| `better-sqlite3`                                                    | Replaced by `libsql`   | Its current release crashes on Node 20; tested from a clean copy                                                           |
+| Rules in the system prompt only                                     | Moved next to the data | The model ignored them; a note at the end of the context and of the search results fixed it                                |
 
 ## Limits
 
@@ -65,6 +66,7 @@ Each live case ran once, on cases I wrote; a pass is one good answer, not a guar
 ## With another week
 
 - Run LongMemEval and BEAM for a number comparable with published systems.
+- Typed relations between entities, for questions that chain through several of them.
 - Mark replaced memories in code, and re-check saved prices on a schedule ("Neon changed since you asked").
 - Build evals from real transcripts, and run each case several times.
 

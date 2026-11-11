@@ -1,2 +1,223 @@
 @import "tailwindcss";
 @plugin "@tailwindcss/typography";
+
+/*
+ * Kuro's design system, light theme. Elevation comes from tone, not shadow: surface-0 is the
+ * page, surface-05 a recessed input, surface-1 a raised card, surface-2 the hairlines (always used
+ * at /20–/40 opacity). One accent, mostly at low opacity.
+ */
+@theme {
+  --font-sans: var(--font-geist-sans), ui-sans-serif, system-ui, sans-serif;
+  --font-mono: var(--font-geist-mono), ui-monospace, monospace;
+
+  --color-surface-0: #fafafa;
+  --color-surface-05: #f5f5f8;
+  --color-surface-1: #f0f0f3;
+  --color-surface-2: #dcdce2;
+  --color-surface-3: #c2c2ca;
+  --color-text-primary: #1a1a1f;
+  --color-text-secondary: #3c3c44;
+  --color-text-tertiary: #6e6e7a;
+  --color-accent: #5b63e0;
+  --color-mode-query: #0d9e6e;
+
+  /* Light-mode elevation: a 1px ring instead of a border, plus soft cool-tinted depth. */
+  --shadow-ring:
+    0 0 0 1px rgb(20 20 40 / 0.06), 0 1px 2px -1px rgb(20 20 40 / 0.06),
+    0 2px 4px 0 rgb(20 20 40 / 0.04);
+  --shadow-ring-hover:
+    0 0 0 1px rgb(20 20 40 / 0.1), 0 1px 2px -1px rgb(20 20 40 / 0.08),
+    0 2px 4px 0 rgb(20 20 40 / 0.06);
+  --shadow-float:
+    0 0 0 1px rgb(20 20 40 / 0.07), 0 2px 4px -2px rgb(20 20 40 / 0.06),
+    0 12px 32px -12px rgb(20 20 40 / 0.14);
+  --shadow-float-focus:
+    0 0 0 1px rgb(91 99 224 / 0.4), 0 0 0 4px rgb(91 99 224 / 0.08),
+    0 12px 32px -12px rgb(20 20 40 / 0.14);
+
+  --animate-message-in: message-in 0.3s ease-out both;
+  --animate-fade-in: fade-in 0.5s ease-out both;
+  --animate-fade-up: fade-up 0.35s ease-out both;
+  --animate-enter: enter 0.8s cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+/* Entrances rise out of a slight blur and settle slowly; staggered with animation-delay. */
+@keyframes enter {
+  from {
+    opacity: 0;
+    transform: translateY(12px);
+    filter: blur(4px);
+  }
+}
+
+@keyframes message-in {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+}
+
+@keyframes fade-in {
+  from {
+    opacity: 0;
+  }
+}
+
+@keyframes fade-up {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+}
+
+@layer base {
+  body {
+    background: var(--color-surface-05);
+    color: var(--color-text-primary);
+  }
+  :focus-visible {
+    outline: 2px solid color-mix(in srgb, var(--color-accent) 50%, transparent);
+    outline-offset: 2px;
+  }
+  ::selection {
+    background: color-mix(in srgb, var(--color-accent) 16%, transparent);
+  }
+  * {
+    scrollbar-width: thin;
+    scrollbar-color: #c8c8d0 transparent;
+  }
+}
+
+/* Kuro's accent wash over the white chat panel, so it never reads as flat. */
+.gradient-page {
+  background:
+    radial-gradient(ellipse 80% 50% at 20% 0%, rgb(91 99 224 / 0.08) 0%, transparent 70%),
+    radial-gradient(ellipse 60% 40% at 80% 100%, rgb(91 99 224 / 0.04) 0%, transparent 70%),
+    linear-gradient(180deg, rgb(91 99 224 / 0.05) 0%, transparent 50%), #fff;
+}
+
+/* Messages fade out just above the composer instead of meeting a hard edge. */
+.fade-bottom {
+  mask-image: linear-gradient(to bottom, black calc(100% - 2.5rem), transparent);
+}
+
+/* Work in progress ("Thinking…", "Searching the web…"): a shine sweeps through accent text. */
+.step-shimmer {
+  background: linear-gradient(
+    -20deg,
+    var(--color-accent) 25%,
+    color-mix(in srgb, var(--color-accent), white 60%) 50%,
+    var(--color-accent) 75%
+  );
+  background-size: 200% auto;
+  background-clip: text;
+  color: transparent;
+  animation: text-shine 3s linear infinite;
+}
+
+@keyframes text-shine {
+  from {
+    background-position: -200% center;
+  }
+  to {
+    background-position: 200% center;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .step-shimmer {
+    animation: none;
+  }
+}
+
+/* Answers: Kuro's markdown scale (14px, loose 1.7 leading, tight block spacing). */
+.prose {
+  --tw-prose-body: var(--color-text-primary);
+  --tw-prose-headings: var(--color-text-primary);
+  --tw-prose-bold: var(--color-text-primary);
+  --tw-prose-links: var(--color-accent);
+  --tw-prose-bullets: var(--color-text-tertiary);
+  --tw-prose-counters: var(--color-text-tertiary);
+  --tw-prose-quotes: var(--color-text-secondary);
+  --tw-prose-quote-borders: color-mix(in srgb, var(--color-accent) 30%, transparent);
+  --tw-prose-code: var(--color-accent);
+  --tw-prose-pre-bg: var(--color-surface-1);
+  --tw-prose-pre-code: var(--color-text-secondary);
+  --tw-prose-hr: color-mix(in srgb, var(--color-surface-2) 40%, transparent);
+  --tw-prose-th-borders: var(--color-surface-2);
+  --tw-prose-td-borders: color-mix(in srgb, var(--color-surface-2) 40%, transparent);
+  font-size: 14px;
+  line-height: 1.7;
+}
+.prose :where(p) {
+  margin: 0 0 0.5rem;
+  text-wrap: pretty;
+}
+.prose :where(ul, ol) {
+  margin: 0 0 0.5rem;
+  padding-left: 1rem;
+}
+.prose :where(li) {
+  margin: 0.25rem 0;
+  line-height: 1.6;
+  text-wrap: pretty;
+}
+.prose :where(h1, h2, h3) {
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  text-wrap: balance;
+}
+.prose :where(h1) {
+  font-size: 1.125rem;
+  margin: 1rem 0 0.5rem;
+}
+.prose :where(h2) {
+  font-size: 1rem;
+  margin: 0.75rem 0 0.375rem;
+}
+.prose :where(h3) {
+  font-size: 0.875rem;
+  margin: 0.5rem 0 0.25rem;
+}
+.prose :where(table) {
+  font-size: 13px;
+  margin: 0.5rem 0;
+}
+.prose :where(th) {
+  font-weight: 500;
+  color: var(--color-text-secondary);
+}
+.prose :where(blockquote) {
+  font-style: italic;
+  font-weight: 400;
+  margin: 0.5rem 0;
+  padding-left: 0.75rem;
+}
+.prose :where(pre) {
+  border-radius: 8px;
+  padding: 0.75rem;
+  margin: 0.5rem 0;
+  font-size: 13px;
+}
+.prose :where(a) {
+  font-weight: 400;
+  text-decoration-color: color-mix(in srgb, var(--color-accent) 30%, transparent);
+  text-underline-offset: 2px;
+}
+.prose :where(code):not(:where(pre code)) {
+  background: var(--color-surface-1);
+  border-radius: 4px;
+  padding: 0.125rem 0.375rem;
+  font-size: 13px;
+  font-weight: 400;
+}
+.prose :where(code):not(:where(pre code))::before,
+.prose :where(code):not(:where(pre code))::after {
+  content: none;
+}
+.prose > :first-child {
+  margin-top: 0;
+}
+.prose > :last-child {
+  margin-bottom: 0;
+}

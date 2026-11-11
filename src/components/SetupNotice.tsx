@@ -16,7 +16,10 @@ export function SetupNotice() {
 
 function Alert({ children }: { children: ReactNode }) {
   return (
-    <p role="alert" className="rounded-md border border-amber-300 bg-amber-50 p-3 text-sm">
+    <p
+      role="alert"
+      className="rounded-2xl border border-amber-500/20 bg-amber-500/5 px-4 py-3 text-[13px] leading-relaxed text-amber-800 [&_code]:rounded [&_code]:bg-amber-500/10 [&_code]:px-1 [&_code]:font-mono [&_code]:text-[12px]"
+    >
       {children}
     </p>
   );
