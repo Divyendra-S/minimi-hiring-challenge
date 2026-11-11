@@ -47,8 +47,9 @@ export function tavily(apiKey: string): Search {
     const body = {
       query,
       // Measured on our queries: "fast" answers in about 0.6 s, "basic" in 1.4 to 2.3 s, with
-      // results of similar length.
-      search_depth: "fast",
+      // results of similar length. Inside a time window "fast" finds too little: on 3 queries
+      // limited to a week or a month it returned 0, 2 and 3 pages where "basic" returned 5, 4, 3.
+      search_depth: recency ? "basic" : "fast",
       max_results: 5,
       time_range: recency,
       include_domains: sites?.length ? sites : undefined,

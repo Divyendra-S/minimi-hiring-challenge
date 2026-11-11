@@ -17,7 +17,8 @@ const AFTER_SEARCH =
   "Now answer every part of the user's message, and follow any Note at the end of its context.";
 const INVALID_CALL = "Invalid tool call: use web_search with a searches array.";
 
-export type AgentDeps = { llm: Llm; search: Search };
+/** `now` is fixed in tests and evals; the app leaves it to the clock. */
+export type AgentDeps = { llm: Llm; search: Search; now?: () => Date };
 
 /**
  * One model, one tool: the model decides whether to search through normal tool calling, so
@@ -60,7 +61,9 @@ export async function* runAgent(
       calls.map(async ({ id, args }) => ({
         role: "tool" as const,
         tool_call_id: id,
-        content: args ? await webSearch(deps.search, args, sources, signal) : INVALID_CALL,
+        content: args
+          ? await webSearch(deps.search, args, sources, signal, deps.now?.())
+          : INVALID_CALL,
       })),
     );
     signal?.throwIfAborted();

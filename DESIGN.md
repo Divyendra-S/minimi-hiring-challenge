@@ -20,7 +20,7 @@ after the reply ─► one extraction call ─► memories ─► local embeddin
 - **What is current.** Memories are append-only and carry a subject. When a newer one has the same subject, code marks the old one `[replaced on 6 Nov]` and the new one `[current]`.
 - **Re-check** (`src/core/agent/recheck.ts`). Every claim keeps its source URL. When the message asks whether facts still hold and names a day or a product, code fetches those pages, so the turn takes one model call, not two.
 - **No search for remembered values.** "At the prices you gave me" is matched in code and the tool is not offered; told only in the prompt, the model searched on 3 of 3.
-- **Search.** One `web_search` call carries up to 10 parallel searches, each with its own `site` and `recency`. Two rounds at most. Results are untrusted data, cited by number.
+- **Search.** One `web_search` call carries up to 10 parallel searches, each with its own `site` and `recency`. Two rounds at most. A query that names a recent date gets a time window in code: asked about "this week", the model searched all time on 4 of 4. Results are untrusted data, cited by number.
 - **Writing memory.** After the answer, one structured call extracts preferences, facts, decisions and sourced claims. `npm run reindex` rebuilds memory from the log.
 - **Stack.** Next.js, one SQLite file, OpenRouter, Tavily. Two API keys.
 
