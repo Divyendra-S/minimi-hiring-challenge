@@ -59,6 +59,7 @@ Each live case ran once, on cases I wrote. A turn costs $0.0003 to $0.002.
 ## With another week
 
 - Run LongMemEval for a number comparable with published systems.
-- Re-check saved prices on a schedule and tell the user first.
+- A background worker that maintains memory as time passes: re-check saved prices on a schedule and tell the user first, merge two names for one subject, retire memories a later chat contradicts, and summarise old chats.
+- Let the user see, correct and delete what is remembered.
 
 Every experiment is recorded in `MEMORY_ARCHITECTURE.md`.
