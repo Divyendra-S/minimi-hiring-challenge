@@ -15,11 +15,13 @@ after the reply ─► one extraction call ─► memories ─► local embeddin
 ## How it works
 
 - **Recall** (`src/core/memory/context.ts`, no model call). Date phrases become day ranges in the user's time zone, and those conversations are quoted. Memories are found by date, keyword (SQLite FTS5), meaning (a 23 MB embedding model in-process), entity, and one hop along entity links, then merged by reciprocal rank fusion. An empty section says "none", so the agent does not invent a past.
-- **The log is searched too.** Advice (an agenda, a recipe) leaves no memory. So three past answers are quoted whole: the one the top memory came from, then the best keyword matches over the messages.
+- **The log is searched too.** Advice (an agenda, a recipe) leaves no memory, so three past answers are quoted whole: the one the top memory came from, then the best keyword matches.
+- **Who the user is.** Their decisions, facts and preferences ride along on every turn, one list each, newest first. A decision brings the prices of the options it was chosen from.
 - **What is current.** Memories are append-only and carry a subject. When a newer one has the same subject, code marks the old one `[replaced on 6 Nov]` and the new one `[current]`.
-- **Re-check** (`src/core/agent/recheck.ts`). Every claim keeps its source URL. When the message asks whether facts still hold and names a day or a product, code fetches those pages and puts old value and live page side by side. If the page shows the value, the turn takes one model call, not two.
+- **Re-check** (`src/core/agent/recheck.ts`). Every claim keeps its source URL. When the message asks whether facts still hold and names a day or a product, code fetches those pages, so the turn takes one model call, not two.
+- **No search for remembered values.** "At the prices you gave me" is matched in code and the tool is not offered; told only in the prompt, the model searched on 3 of 3.
 - **Search.** One `web_search` call carries up to 10 parallel searches, each with its own `site` and `recency`. Two rounds at most. Results are untrusted data, cited by number.
-- **Writing memory.** After the answer, one structured call extracts preferences, facts, decisions and sourced claims. The log is the source of truth: `npm run reindex` rebuilds memory from it.
+- **Writing memory.** After the answer, one structured call extracts preferences, facts, decisions and sourced claims. `npm run reindex` rebuilds memory from the log.
 - **Stack.** Next.js, one SQLite file, OpenRouter, Tavily. Two API keys.
 
 ## Results
@@ -28,9 +30,11 @@ On a 47-chat, 191-turn sample history (the "Load demo history" button):
 
 | Check                                                 | Result                                     |
 | ----------------------------------------------------- | ------------------------------------------ |
-| Right context reaches the prompt, offline, in CI      | 143 of 143                                 |
+| Right context reaches the prompt, offline, in CI      | 159 of 159                                 |
 | Reworded questions, before and after embeddings       | 1 of 8 → 8 of 8                            |
 | A detail deep in a long answer, 0 to 3 answers quoted | 0, 3, 7, 8 of 8                            |
+| Questions needing 4 to 9 chats at once, before, after | 0 of 6 → 6 of 6 offline; 5 of 6 live       |
+| 10 extreme questions, before and after four fixes     | 5 of 10 → 10 of 10                         |
 | Live answers, 35 runs                                 | 34 passed; the miss was fixed and rerun    |
 | First word, recall only                               | 1.4–3.2 s                                  |
 | First word on "has it changed?", re-check off and on  | 8.1–10.0 s → 5.0–6.9 s on 3 of 4 questions |
@@ -42,7 +46,7 @@ Each live case ran once, on cases I wrote. A turn costs $0.0003 to $0.002.
 | Option                                     | Why not                                                          |
 | ------------------------------------------ | ---------------------------------------------------------------- |
 | A memory tool the model calls              | One more model round, about 2 s, on the brief's own questions    |
-| A model call to rewrite or route the query | A serial call on every turn; recall in code passes 143 of 143    |
+| A model call to rewrite or route the query | A serial call on every turn; recall in code passes 159 of 159    |
 | Vector database, embedding API             | One user's vectors compare in 1 ms; the local model needs no key |
 | Knowledge graph with multi-hop traversal   | Each level needs a model round; one hop passed every case        |
 | Planner, researcher and writer agents      | More serial calls, more ways to fail                             |
@@ -51,9 +55,10 @@ Each live case ran once, on cases I wrote. A turn costs $0.0003 to $0.002.
 
 ## Limits
 
-- Some answers end in "couldn't verify": a vendor's page can be served by region (Zoho's prices came back in rupees). Searches of a vendor's site run a second, slower search for better pages, which fixed one such answer in three.
+- Some answers end in "couldn't verify": a vendor's page can be served by region (Zoho's prices came back in rupees).
 - "Has it changed?" turns still take 5 to 9 s to the first word.
-- Past answers are quoted on any turn that shares a word with one, small talk included.
+- The prompt is about 3,000 tokens before the question, small talk included.
+- The offline checks cover recall only: typing into the app found two bugs they missed. The no-search rule is a word pattern; other wordings fall back to the model.
 - Subjects are named by the extraction model. Two names for one thing would hide a replacement.
 
 ## With another week

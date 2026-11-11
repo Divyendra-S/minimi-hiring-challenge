@@ -404,3 +404,35 @@ Five live questions, before and after (each once):
 | The brief's Postgres question      | Correct                                 | Correct                                                   | 6.6 → 6.5 s  |
 
 So one of the three weak answers is fixed, one is unchanged, and the Node answer is right but took three model calls in this run. The slowest search took 1.6 to 2.8 s. Zoho stays a limit: its pricing page is served by region.
+
+## 15. Two bugs found by using the app (11 Nov 2026)
+
+Both were found in five prompts typed into the running app, after 143 offline checks had passed.
+
+- **"Is your answer still correct today?" re-checked the wrong pages.** "today" was read as a day to recall, so today's chats were quoted and their sources (a cricket page) were fetched in place of the ones from 3 November. The test history had no chats dated today. Fix: next to an earlier day, today is when to compare, not a day to recall. Rerun in the app: the three pricing pages were fetched and cited.
+- **Only the first turn after each start was memorized.** The extraction job waited for an embedding job queued behind itself, so the queue never moved again. 8 of 186 memories had no vector, and seven turns had no memories. The offline checks seed memories directly and never ran the queue. Fix: embedding runs inside the extraction job.
+
+What this says about the evidence: the offline checks cover recall, not the write path under real use.
+
+## 16. Sixth round: questions that need many chats at once (11 Nov 2026)
+
+**Ten harder prompts, typed into the app through a browser:** 5 passed, 2 were partly right, 3 failed. Rebuilding the context for the five weak ones showed that every miss was recall: the facts were not in the prompt.
+
+| Question                                                                          | What was missing                                | Cause                                                                                                                                                     | Fix                                                                                                                                                                           |
+| --------------------------------------------------------------------------------- | ----------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| "Add up what I pay per month for everything I've decided on for the side project" | The prices of two of the tools (Vercel, Resend) | Nine decisions and their prices did not fit in 40 lines; keyword noise ("month", "prices") took the places                                                | 40 → 60 memories                                                                                                                                                              |
+| "What do you know about my family?"                                               | Daughter's age, partner, father                 | "family" is not close in meaning to "The user's father turns 60": similarity 0.1 to 0.15, the same as unrelated memories                                  | The user's facts, preferences and decisions are sent on every turn ("About the user"), newest first, up to 120, without the ones a newer one replaced                         |
+| "Which restaurants did you suggest for the Portugal trip?"                        | The answer that names them                      | It has no memory, the chat never says "Portugal", and three long answers that say "trip" outranked the turn that asked "Any good vegetarian restaurants?" | The keyword search over answers looks first in the conversations the best memories come from, and a word found in the past question counts four times one found in the answer |
+| "PandaDoc, Fathom and Sales Navigator for the people who'd use each"              | Who uses each: 12 account executives, 8 SDRs    | The sample history had no memory for "Only the 12 account executives send contracts", which extraction would save                                         | Three memories added to the sample history; "About the user" carries them                                                                                                     |
+| "List every database decision"                                                    | Nothing after the fixes                         | The model lists only the two hosting decisions                                                                                                            | Not fixed: an instruction to be complete did not change it                                                                                                                    |
+
+**Offline:** six new checks (group `w`): 0 of 6 before, 6 of 6 after; all checks 149 of 149. Recall takes 7 ms p50, 10 ms p90. The median context grew from about 8,200 to 12,300 characters.
+
+**Live** (each once or twice, `gpt-6-luna`):
+
+- First run of the six: 5 passed. "About me" said the project uses Redis, from the fact "would use Redis to cache": the decision not to add it was not in the profile. Decisions were added, and the rerun got it right.
+- Still wrong after the rerun: "12 account executives and 13 SDRs". The history says 12 and 8, then five more reps; the model worked out 13.
+- The cost question gave the right total ($71) in three runs of three, but searched the web in two of them, although it asks for "the prices you gave me". Two wordings of the rule did not stop it.
+- Five earlier questions rerun as a regression check, the brief's "3 November" among them: all passed.
+
+**What this does not show.** The six checks were written from the app's own failures, and three memories were added to the sample data for one of them. The fixes are general (a profile, a larger budget, a better turn search), but they have not been tried on questions I have not seen.

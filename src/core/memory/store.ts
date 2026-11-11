@@ -23,12 +23,20 @@ type MessageRow = Omit<StoredMessage, "sources"> & { sourcesJson: string };
 type LoggedRow = Omit<LoggedMessage, "sources"> & { sourcesJson: string };
 type TurnRow = Omit<LoggedTurn, "sources"> & { sourcesJson: string };
 
+// A word of the message found in a past question counts this many times one found in the
+// answer. Seen live: "which restaurants did you suggest for the trip?" ranked three long answers
+// that say "trip" above the turn that asked "Any good vegetarian restaurants?".
+const QUESTION_WEIGHT = 4;
+
 /** The message log: sessions and messages. Every query is scoped by user id. */
 export function createStore(db: Db) {
   db.exec(LOG_SCHEMA);
-  // Built once, from the messages already there, in a database made before the index existed.
-  const indexed = db.prepare("SELECT 1 FROM sqlite_master WHERE name = 'turns_fts'").get();
-  if (!indexed) db.exec(TURN_INDEX_SCHEMA);
+  // Built once, from the messages already there, in a database made before the index existed
+  // or while it had a single column.
+  const index = db
+    .prepare<[], { sql: string }>("SELECT sql FROM sqlite_master WHERE name = 'turns_fts'")
+    .get();
+  if (!index?.sql.includes("question")) db.exec(TURN_INDEX_SCHEMA);
 
   const insertSession = db.prepare(
     "INSERT INTO sessions (id, user_id, title, created_at, updated_at) VALUES (?, ?, ?, ?, ?)",
@@ -72,7 +80,7 @@ export function createStore(db: Db) {
      FROM turns_fts f JOIN messages a ON a.rowid = f.rowid JOIN sessions s ON s.id = a.session_id
      WHERE turns_fts MATCH ?1 AND a.user_id = ?2 AND a.session_id != ?3
        AND (?4 IS NULL OR a.session_id IN (SELECT value FROM json_each(?4)))
-     ORDER BY bm25(turns_fts) LIMIT ?5`,
+     ORDER BY bm25(turns_fts, ${QUESTION_WEIGHT}, 1.0) LIMIT ?5`,
   );
   const selectTurn = db.prepare<[string, string, string], TurnRow>(
     `SELECT ${turnColumns} FROM messages a JOIN sessions s ON s.id = a.session_id

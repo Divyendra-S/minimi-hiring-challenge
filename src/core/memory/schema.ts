@@ -26,16 +26,20 @@ CREATE INDEX IF NOT EXISTS messages_by_user_time ON messages (user_id, created_a
 // A keyword index over the log itself: one row per answer, holding the question and the answer.
 // Advice (directions, an agenda, a recipe) leaves no saved memory, so this is how it is found.
 // It stores no text of its own (content = ''), and a trigger keeps it up to date.
-const TURN_TEXT = `COALESCE((SELECT q.content FROM messages q WHERE q.session_id = a.session_id
-  AND q.role = 'user' AND q.rowid < a.rowid ORDER BY q.rowid DESC LIMIT 1), '') || ' ' || a.content`;
+const QUESTION = `COALESCE((SELECT q.content FROM messages q WHERE q.session_id = a.session_id
+  AND q.role = 'user' AND q.rowid < a.rowid ORDER BY q.rowid DESC LIMIT 1), '')`;
 export const TURN_INDEX_SCHEMA = `
-CREATE VIRTUAL TABLE turns_fts USING fts5 (text, content = '', tokenize = 'porter unicode61');
+DROP TRIGGER IF EXISTS turns_fts_insert;
+DROP TABLE IF EXISTS turns_fts;
+CREATE VIRTUAL TABLE turns_fts USING fts5 (
+  question, answer, content = '', tokenize = 'porter unicode61'
+);
 CREATE TRIGGER turns_fts_insert AFTER INSERT ON messages WHEN new.role = 'assistant' BEGIN
-  INSERT INTO turns_fts (rowid, text)
-  SELECT a.rowid, ${TURN_TEXT} FROM messages a WHERE a.rowid = new.rowid;
+  INSERT INTO turns_fts (rowid, question, answer)
+  SELECT a.rowid, ${QUESTION}, a.content FROM messages a WHERE a.rowid = new.rowid;
 END;
-INSERT INTO turns_fts (rowid, text)
-SELECT a.rowid, ${TURN_TEXT} FROM messages a WHERE a.role = 'assistant';
+INSERT INTO turns_fts (rowid, question, answer)
+SELECT a.rowid, ${QUESTION}, a.content FROM messages a WHERE a.role = 'assistant';
 `;
 
 // Memories are derived from the log, so all of this can be dropped and rebuilt (npm run reindex).

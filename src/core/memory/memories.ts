@@ -86,7 +86,7 @@ export function createMemoryStore(db: Db) {
   );
   // The newest N memories per entity. The ids arrive as a JSON array.
   const selectLinked = db.prepare<[string, string, number], Memory>(
-    `SELECT DISTINCT id, kind, text, topic, sourceUrl, subject, observedAt, sessionId, sessionTitle FROM (
+    `SELECT DISTINCT id, kind, text, topic, sourceUrl, subject, observedAt, sessionId, answerId, sessionTitle FROM (
        SELECT ${MEMORY_COLUMNS},
               ROW_NUMBER() OVER (PARTITION BY l.entity_id ORDER BY m.observed_at DESC) AS n
        FROM memory_entities l JOIN memories m ON m.id = l.memory_id
@@ -112,6 +112,11 @@ export function createMemoryStore(db: Db) {
   );
 
   // Every value a subject has had. The subjects arrive as a JSON array.
+  const selectAbout = db.prepare<[string, number], Memory>(
+    `SELECT ${MEMORY_COLUMNS} FROM memories m
+     WHERE m.user_id = ? AND m.kind != 'claim'
+     ORDER BY m.observed_at DESC LIMIT ?`,
+  );
   const selectHistory = db.prepare<[string, string], Memory>(
     `SELECT ${MEMORY_COLUMNS} FROM memories m
      WHERE m.user_id = ? AND m.subject IN (SELECT value FROM json_each(?))
@@ -202,6 +207,10 @@ export function createMemoryStore(db: Db) {
     fromSessions(userId: string, sessionIds: string[], limit: number): Memory[] {
       if (sessionIds.length === 0) return [];
       return selectFromSessions.all(userId, JSON.stringify(sessionIds), limit);
+    },
+    /** What the user said about themselves and decided, newest first: all but the web's claims. */
+    about(userId: string, limit: number): Memory[] {
+      return selectAbout.all(userId, limit);
     },
     /** Every memory about these subjects, oldest first: the last one of a subject is current. */
     historyOf(userId: string, subjects: string[]): Memory[] {

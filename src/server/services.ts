@@ -73,12 +73,18 @@ export function openRouterAccount(config: Config): Omit<OpenRouterOptions, "mode
  * time, so two requests never extract the same turn twice.
  */
 export function remember(userId: string): Promise<void> {
-  return enqueue(() => memorize(extractDeps(), userId).finally(() => index(userId)));
+  // Embedding runs inside this job, not as a job of its own: a job that waits for one queued
+  // behind it never ends. Seen live: only the first turn after a start was ever memorized.
+  return enqueue(() => memorize(extractDeps(), userId).finally(() => embedNew(userId)));
 }
 
 /** Embeds the user's memories that have no vector yet. */
 export function index(userId: string): Promise<void> {
-  return enqueue(() => indexMemories({ memories: getMemories(), embedder: getEmbedder() }, userId));
+  return enqueue(() => embedNew(userId));
+}
+
+function embedNew(userId: string): Promise<void> {
+  return indexMemories({ memories: getMemories(), embedder: getEmbedder() }, userId);
 }
 
 function enqueue(job: () => Promise<void>): Promise<void> {

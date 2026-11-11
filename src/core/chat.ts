@@ -4,7 +4,7 @@ import type { StoredMessage } from "@/shared/dto";
 import type { ChatEvent, Source, Timings } from "@/shared/events";
 import { type AgentDeps, runAgent } from "./agent/loop";
 import { SYSTEM_PROMPT, withContext } from "./agent/prompt";
-import { asksIfStillTrue, recheck } from "./agent/recheck";
+import { asksIfStillTrue, asksOnlyForRemembered, recheck } from "./agent/recheck";
 import { buildContext, type ContextDeps } from "./memory/context";
 
 // Older context comes from memory, not from replaying the whole session.
@@ -94,7 +94,8 @@ export async function* chat(
   signal?.addEventListener("abort", stop, { once: true });
 
   try {
-    for await (const event of runAgent(deps, messages, signal, cited)) {
+    const rounds = asksOnlyForRemembered(input.message) ? 0 : undefined;
+    for await (const event of runAgent(deps, messages, signal, cited, rounds)) {
       if (event.type === "delta") {
         firstTokenMs ??= elapsed(started);
         text += event.text;

@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { asksIfStillTrue } from "@/core/agent/recheck";
+import { asksIfStillTrue, asksOnlyForRemembered } from "@/core/agent/recheck";
 
 test("re-checks sources only when asked whether a web fact still holds", () => {
   const yes = [
@@ -21,4 +21,23 @@ test("re-checks sources only when asked whether a web fact still holds", () => {
   ];
   for (const message of yes) assert.ok(asksIfStillTrue(message), message);
   for (const message of no) assert.ok(!asksIfStillTrue(message), message);
+});
+
+test("offers no search when the message asks only for remembered values", () => {
+  const yes = [
+    "If we pick Pipedrive over HubSpot for the whole team, how much more is that per year, at the latest prices you gave me?",
+    "Add up what I pay per month for everything I've decided on, at the prices you gave me.",
+    "List every price that changed between two of our conversations: old and new, with both dates.",
+    "What did you say PlanetScale costs?",
+  ];
+  const no = [
+    "Is the MacBook you recommended still $999?",
+    "What did you say Neon costs, and what is it now?",
+    "At the prices you gave me, is HubSpot still cheaper?",
+    "You said Postgres 18 is out. What's new in it?",
+    "What does Pipedrive cost?",
+    "What did I ask you on 3 November? Is your answer still correct today?",
+  ];
+  for (const message of yes) assert.ok(asksOnlyForRemembered(message), message);
+  for (const message of no) assert.ok(!asksOnlyForRemembered(message), message);
 });

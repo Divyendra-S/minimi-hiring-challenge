@@ -30,11 +30,13 @@ export async function* runAgent(
   signal?: AbortSignal,
   /** Pages already in the prompt; search results are numbered after them. */
   sources: Source[] = [],
+  /** 0 when the message asks only for remembered values: the tool is then not offered. */
+  searchRounds = MAX_SEARCH_ROUNDS,
 ): AsyncGenerator<ChatEvent> {
   const conversation = [...messages];
 
   for (let round = 0; ; round++) {
-    const canSearch = round < MAX_SEARCH_ROUNDS;
+    const canSearch = round < searchRounds;
     const reply = yield* deps.llm({
       messages: conversation,
       tools: [webSearchTool],

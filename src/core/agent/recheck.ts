@@ -23,6 +23,24 @@ export function asksIfStillTrue(message: string): boolean {
   return ASKS_ABOUT_CHANGE.test(message) && ABOUT_A_WEB_FACT.test(message);
 }
 
+// The user points at values from an earlier answer ("at the prices you gave me", "what did you
+// say it costs", "between two of our conversations") ...
+const POINTS_AT_AN_EARLIER_ANSWER =
+  /\b(prices?|costs?|numbers?|figures?|rates?|quotes?) (that )?you (gave|told|quoted|showed|said)\b|\b(what|how (much|many|long)) did you (say|tell|quote)\b|\bbetween (two of )?our (conversations|chats)\b/i;
+// ... and nothing in the message asks about the present.
+const ASKS_ABOUT_NOW =
+  /\b(still|now|today|current(ly)?|since|any ?more|these days|up to date|outdated|check|verify|search|look up)\b/i;
+
+/**
+ * Whether the message asks only for values the agent gave before, so no web page can answer it.
+ * The search tool is then not offered. Seen live: told so in the prompt, in two wordings, the
+ * model still searched on 3 of 3 such questions; the answers were right but took 4 to 5 s
+ * instead of 2. When this misses, the model decides as it always did.
+ */
+export function asksOnlyForRemembered(message: string): boolean {
+  return POINTS_AT_AN_EARLIER_ANSWER.test(message) && !ASKS_ABOUT_NOW.test(message);
+}
+
 /**
  * Fetches the sources of the recalled claims as they are now, so the model can compare old and
  * new in its first call instead of spending a call on asking for a search. Returns the block to

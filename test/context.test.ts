@@ -115,13 +115,17 @@ test("finds memories by keyword, and by entities named in the last few messages"
     ),
     byKeyword,
   );
-  assert.ok(!byKeyword.includes("HubSpot"), byKeyword);
+  // Not matched by this message; it is still listed further down, under "About the user".
+  assert.ok(!byKeyword.split("About the user")[0]?.includes("HubSpot"), byKeyword);
 
   // "them" refers to tools named in the previous answer.
   const byEntity = await context("Has either of them changed?", [
     "HubSpot starts at $20 per seat.",
   ]);
-  assert.ok(byEntity.includes("decision: The user shortlisted HubSpot and Close"), byEntity);
+  assert.ok(
+    byEntity.includes('in "Chat", decision: The user shortlisted HubSpot and Close'),
+    byEntity,
+  );
   assert.ok(!byEntity.includes("Neon"), byEntity);
 });
 
@@ -207,8 +211,31 @@ test("finds a memory by meaning when no word matches, unless it is too far off",
     { store, memories, embedder },
     { userId: "u1", sessionId: "none", message: "What's my diet?", recent: [], now, timeZone },
   );
-  assert.ok(context.includes("The user is vegetarian."), context);
-  assert.ok(!context.includes("support team"), context);
+  const [matched = "", about = ""] = context.split("About the user");
+  assert.ok(matched.includes("preference: The user is vegetarian."), context);
+  assert.ok(!matched.includes("support team"), context);
+  // What recall did not match still rides along, as who the user is.
+  assert.ok(about.includes("Thu, 8 Oct 2026: The user's support team has 6 people."), context);
+  assert.ok(!about.includes("vegetarian"), context); // not repeated
+});
+
+test("about the user: a fact that a newer one replaced is left out", async () => {
+  const { store, memories } = stores();
+  const size = (n: number) => ({
+    kind: "fact" as const,
+    text: `The sales team has ${n} people.`,
+    topic: "t",
+    entities: [],
+    subject: "sales team size",
+  });
+  memories.save("u1", logTurn(store, "u1", "2026-11-09T05:00:00.000Z"), [size(20)]);
+  memories.save("u1", logTurn(store, "u1", "2026-11-10T05:00:00.000Z"), [size(25)]);
+  const context = await contextText(
+    { store, memories },
+    { userId: "u1", sessionId: "none", message: "hello", recent: [], now, timeZone },
+  );
+  assert.ok(context.includes("Facts:\n- Tue, 10 Nov 2026: The sales team has 25 people."), context);
+  assert.ok(!context.includes("20 people"), context);
 });
 
 test("a long history also says how many conversations there are, and the first", async () => {

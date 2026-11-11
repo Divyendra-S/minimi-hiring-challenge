@@ -26,7 +26,16 @@ const KEYWORD_MATCHES = 24;
 const NEAREST = 12;
 const MIN_SIMILARITY = 0.25;
 const MEMORIES_PER_ENTITY = 5;
-const MAX_MEMORIES = 40;
+const MAX_MEMORIES = 60;
+const OPTIONS_OF_DECISIONS = 30;
+// Seen live: asked "how many conversations about CRMs?", the model wrote "three" first, then
+// listed four. Told in the system prompt to list first, it still led with the number. A note
+// right before the question is followed.
+const ASKS_HOW_MANY = /\bhow (many|often)\b.*\b(conversations?|chats?|times)\b/i;
+const COUNT_NOTE =
+  "Note: to count conversations, first write one line for each conversation that is on topic, " +
+  "with its title and date. Two conversations on the same day are two lines. Give the number " +
+  "only after the list: it is the number of lines.";
 // How much each way of finding a memory counts when the lists are merged. A day the user named
 // is the strongest signal; a memory that only shares a product with another find is the weakest.
 const WEIGHTS = { date: 3, keyword: 1, meaning: 1, named: 1, related: 0.5 };
@@ -37,6 +46,17 @@ const MEMORIES_PER_CONVERSATION = 12;
 // The usual constant of reciprocal rank fusion: it flattens the gap between ranks 1 and 2.
 const RRF_K = 60;
 const RECENT_SESSIONS = 20;
+// Who the user is rides along on every turn: their facts, preferences and decisions, newest
+// first. Seen live: "What do you know about my family?" found one memory in six, because
+// "family" is not close in meaning to "The user's father turns 60" (similarity 0.1 to 0.15, the
+// same as noise). Decisions are in it because a fact alone can mislead: "would use Redis to
+// cache" was read as "uses Redis", when the decision was not to add it.
+const ABOUT_USER = 120;
+const ABOUT_KINDS = [
+  { kind: "decision", heading: "Decisions" },
+  { kind: "fact", heading: "Facts" },
+  { kind: "preference", heading: "Preferences" },
+] as const;
 // Pages worth fetching again when the user asks whether remembered facts still hold.
 const SOURCES_TO_CHECK = 5;
 
@@ -90,9 +110,11 @@ export async function buildContext(deps: ContextDeps, input: ContextInput): Prom
     `Now: ${formatNow(input.now, input.timeZone)}`,
     ...dates.lines,
     memories.text,
-    ...turnsSection(deps.store, input, dates.sessionIds, memories.answerId),
+    ...aboutSection(deps.memories, input, memories.shown),
+    ...turnsSection(deps.store, input, dates.sessionIds, memories),
     sessionsSection(deps.store, input),
     ...dates.notes,
+    ...(ASKS_HOW_MANY.test(input.message) ? [COUNT_NOTE] : []),
   ].join("\n\n");
   return { text, claims: memories.claims };
 }
@@ -192,24 +214,31 @@ function quoted(answer: LoggedMessage, max: number): string {
 }
 
 /**
- * Past answers in full: the one the best memory came from (found by meaning as well as by
- * keyword), then the ones that share the most telling words with the message. When the message
- * names days that have conversations, only those are searched by keyword.
+ * Past answers in full: the one the best memory came from, then the ones that share the most
+ * telling words with the message. The keyword search looks first where the message points: in
+ * the conversations of the days it names, or else in the conversations its best memories come
+ * from (found by meaning too, so "the Portugal trip" reaches a chat that only says "Lisbon").
  */
 function turnsSection(
   store: Store,
   input: ContextInput,
   sessionIds: string[],
-  answerId: string | undefined,
+  found: { answerId: string | undefined; conversations: string[] },
 ): string[] {
   const { userId, sessionId, message, timeZone } = input;
   const query = keywordQuery(message);
-  const within = sessionIds.length ? sessionIds : null;
-  const found = [
-    ...(answerId ? [store.turn(userId, answerId, sessionId)] : []),
-    ...(query ? store.turnsMatching(userId, query, sessionId, within, TURNS_QUOTED) : []),
+  const search = (within: string[] | null) =>
+    query ? store.turnsMatching(userId, query, sessionId, within, TURNS_QUOTED) : [];
+  const candidates = [
+    ...(found.answerId ? [store.turn(userId, found.answerId, sessionId)] : []),
+    ...(sessionIds.length
+      ? search(sessionIds)
+      : [...(found.conversations.length ? search(found.conversations) : []), ...search(null)]),
   ].flatMap((turn) => turn ?? []);
-  const turns = [...new Map(found.map((turn) => [turn.id, turn])).values()].slice(0, TURNS_QUOTED);
+  const turns = [...new Map(candidates.map((turn) => [turn.id, turn])).values()].slice(
+    0,
+    TURNS_QUOTED,
+  );
   if (turns.length === 0) return [];
   const blocks = turns.map((turn: LoggedTurn) => {
     const asked = cut(turn.question, QUESTION_CHARS);
@@ -217,6 +246,29 @@ function turnsSection(
     return `- ${day}, in "${turn.sessionTitle}"\n  User: ${asked}\n  You: ${quoted(turn, TURN_CHARS)}`;
   });
   return [["Earlier answers in full (some may be off topic):", ...blocks].join("\n")];
+}
+
+/** The user's facts, preferences and decisions that the memories above don't already show. */
+function aboutSection(memories: MemoryStore, input: ContextInput, shown: Set<string>): string[] {
+  const all = memories.about(input.userId, ABOUT_USER);
+  // A fact that a newer one replaced (a team of 20, now 25) is left out.
+  const subjects = [...new Set(all.flatMap((m) => m.subject ?? []))];
+  const current = new Map(memories.historyOf(input.userId, subjects).map((m) => [m.subject, m.id]));
+  const rest = all.filter(
+    (m) => !shown.has(m.id) && (!m.subject || current.get(m.subject) === m.id),
+  );
+  if (rest.length === 0) return [];
+  // One list per kind. Seen live: in a single list, asked for "my most recent decision", the
+  // model gave the newest line, which was a fact.
+  const lists = ABOUT_KINDS.flatMap(({ kind, heading }) => {
+    const lines = rest
+      .filter((m) => m.kind === kind)
+      .map((m) => `- ${formatDay(new Date(m.observedAt), input.timeZone)}: ${m.text}`);
+    return lines.length ? [`${heading}:`, ...lines] : [];
+  });
+  return [
+    ["About the user, from all conversations (each list newest first):", ...lists].join("\n"),
+  ];
 }
 
 function memoriesSection(
@@ -250,7 +302,8 @@ function memoriesSection(
   const rest = memories.fromSessions(userId, conversations, MEMORIES_PER_CONVERSATION * 2);
   const best = fuse([...ranked, { list: rest, weight: WEIGHTS.related }]).slice(0, MAX_MEMORIES);
   if (best.length === 0) {
-    return { text: "Saved memories: none match this message.", claims: [], answerId: undefined };
+    const text = "Saved memories: none match this message.";
+    return { text, claims: [], answerId: undefined, conversations: [], shown: new Set<string>() };
   }
 
   // A price, a team size or a choice can be replaced by a newer memory about the same subject.
@@ -262,7 +315,29 @@ function memoriesSection(
     const newer = m.subject ? current.get(m.subject) : undefined;
     return newer && newer.id !== m.id ? newer : undefined;
   };
-  const shown = [...new Map([...best, ...history].map((m) => [m.id, m])).values()];
+  // A decision is read with what it was chosen from: the prices of the options compared in the
+  // same conversation. A price whose product the decision does not name is marked as not
+  // chosen, by entity link. Seen live: "which tools did I decide against?" found "decided to
+  // send email with Resend" but not the Postmark price next to it; and shown unmarked, the
+  // model did not connect the two.
+  const decisions = best.filter((m) => m.kind === "decision");
+  const options = memories
+    .fromSessions(userId, [...new Set(decisions.map((m) => m.sessionId))], OPTIONS_OF_DECISIONS * 2)
+    .filter((m) => m.kind === "claim")
+    .slice(0, OPTIONS_OF_DECISIONS);
+  const chosenIn = new Map<string, Set<number>>();
+  for (const d of decisions) {
+    const chosen = chosenIn.get(d.sessionId) ?? new Set<number>();
+    for (const id of memories.entitiesOf([d.id])) chosen.add(id);
+    chosenIn.set(d.sessionId, chosen);
+  }
+  const notChosen = (m: Memory) => {
+    const chosen = chosenIn.get(m.sessionId);
+    if (m.kind !== "claim" || !chosen?.size) return false;
+    const about = memories.entitiesOf([m.id]);
+    return about.length > 0 && !about.some((id) => chosen.has(id));
+  };
+  const shown = [...new Map([...best, ...history, ...options].map((m) => [m.id, m])).values()];
   const day = (m: Memory) => formatDay(new Date(m.observedAt), timeZone);
   const lines = shown
     .sort((a, b) => a.observedAt.localeCompare(b.observedAt))
@@ -270,7 +345,13 @@ function memoriesSection(
       const source = m.sourceUrl ? ` (source: ${m.sourceUrl})` : "";
       const newer = replacedBy(m);
       const isNewest = !newer && history.some((h) => h.subject === m.subject && h.id !== m.id);
-      const status = newer ? ` [replaced on ${day(newer)}]` : isNewest ? " [current]" : "";
+      const status = newer
+        ? ` [replaced on ${day(newer)}]`
+        : isNewest
+          ? " [current]"
+          : notChosen(m)
+            ? " [compared, not chosen that day]"
+            : "";
       return `- ${day(m)}, in "${m.sessionTitle}", ${m.kind}: ${m.text}${source}${status}`;
     });
   // The pages worth fetching again are those of the claims the message points at surely: on a
@@ -295,6 +376,8 @@ function memoriesSection(
     text: ["Saved memories that may be relevant (oldest first):", ...lines].join("\n"),
     claims: [...byUrl].slice(0, SOURCES_TO_CHECK).map(([url, text]) => ({ url, text })),
     answerId: best[0]?.answerId,
+    conversations,
+    shown: new Set(shown.map((m) => m.id)),
   };
 }
 

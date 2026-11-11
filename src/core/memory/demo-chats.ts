@@ -1727,7 +1727,10 @@ export const DEMO_CHATS: DemoChat[] = [
           "\n" +
           "If a customer declines, the rep should be able to remove the notetaker in one click, so show everyone where that button is.",
         memories: [
-          decision("The user decided to trial Fathom for recording sales calls.", "Fathom"),
+          decision(
+            "The user decided to trial Fathom with the account executives, for recording sales calls.",
+            "Fathom",
+          ),
         ],
       },
     ],
@@ -2477,7 +2480,9 @@ export const DEMO_CHATS: DemoChat[] = [
           "- With 8 seats, ask LinkedIn's sales team for a quote, since there is sometimes a discount at that size.\n" +
           "\n" +
           "Taxes are added where they apply.",
-        memories: [],
+        memories: [
+          fact("Sales Navigator would go only to the 8 SDRs.", "LinkedIn Sales Navigator"),
+        ],
       },
       {
         question: "Does Core sync with a CRM?",
@@ -4500,7 +4505,7 @@ export const DEMO_CHATS: DemoChat[] = [
           "- Whether CRM integration is included or needs a higher tier.\n" +
           "\n" +
           "With 12 account executives each closing two or three deals a month, you would send 25 to 40 contracts a month, which is inside the entry plans' limits.",
-        memories: [],
+        memories: [fact("Only the 12 account executives send sales contracts.")],
       },
       {
         question: "We also want templates with pricing tables.",

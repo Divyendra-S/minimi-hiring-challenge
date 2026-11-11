@@ -31,6 +31,8 @@ export const GROUPS = {
   x: "Long: hard, several steps at once",
   y: "Long: later turns, replaced values, re-checks",
   z: "Long: a detail deep in a long answer",
+  w: "Long: extreme, many chats at once",
+  u: "Long: extreme, second set",
 } as const;
 
 export type EvalCase = {
@@ -1352,5 +1354,162 @@ export const CASES: EvalCase[] = [
     message: "Which presets did you suggest for the desk height?",
     context: { has: ["78 cm for sitting and 118 cm for standing"] },
     answer: { search: false, has: [/78/, /118/] },
+  },
+  // Found by typing them into the app: each needs facts from four to nine chats at once.
+  {
+    id: "w1",
+    history: "long",
+    message:
+      "Add up what I pay per month for everything I've decided on for the side project, at the prices you gave me. List each item.",
+    context: {
+      has: [
+        "Vercel Pro costs $20",
+        "Resend Pro costs $20",
+        "Sentry's Team plan costs $26",
+        "$5 monthly minimum",
+        "Auth.js",
+        "PostHog's free tier",
+        "GitHub Actions",
+        "Cloudflare R2",
+        "$10.44 a year",
+      ],
+    },
+    answer: { search: false, has: [/Resend/, /\$7[01]/] },
+  },
+  {
+    id: "w2",
+    history: "long",
+    message:
+      "List every database decision I've made for the side project in order, with dates, and say which one stands today.",
+    context: {
+      has: [
+        "The user prefers Postgres for new projects.",
+        "The user decided to host the side project's database on Railway.",
+        "The user decided to move the side project's database from Railway to Neon.",
+        "pg_dump to Cloudflare R2",
+      ],
+    },
+    answer: { search: false, has: [/Railway/, /Neon/, /Postgres/, /backup|pg_dump/i] },
+  },
+  {
+    id: "w3",
+    history: "long",
+    message:
+      "How much would PandaDoc, Fathom and Sales Navigator Core cost us per year in total, counting only the people who'd actually use each?",
+    context: {
+      has: [
+        "PandaDoc Starter costs $19",
+        "Fathom's team plan costs $19",
+        "$79.99 per month billed annually",
+        "Only the 12 account executives send sales contracts.",
+        "Sales Navigator would go only to the 8 SDRs.",
+        "with the account executives",
+      ],
+    },
+    answer: { search: false, has: [/13,1\d\d/] },
+  },
+  {
+    id: "w4",
+    history: "long",
+    message: "What do you know about my family?",
+    context: {
+      has: [
+        "The user's daughter is 9 years old.",
+        "The user is travelling to Lisbon in March with their partner.",
+        "The user's father turns 60 on 22 November",
+      ],
+    },
+    answer: { search: false, has: [/daughter/, /partner/, /father|dad/i] },
+  },
+  {
+    id: "w5",
+    history: "long",
+    message: "Which restaurants did you suggest for the Portugal trip, and why do they suit me?",
+    context: { has: ["Ao 26 Vegan Food Project", "The user is vegetarian."] },
+    answer: { search: false, has: [/Ao 26/, /Food Temple/, /vegetarian/i] },
+  },
+  {
+    id: "w6",
+    history: "long",
+    message: "What do you know about me?",
+    context: {
+      has: ["The user is vegetarian.", "The user's company is based in Austin, Texas.", "190 cm"],
+    },
+    answer: { search: false, has: [/vegetarian/i, /Austin/] },
+  },
+  // A second set, written before the app had seen any of them.
+  {
+    id: "u1",
+    history: "long",
+    message: "Which tools did I look at for the side project but decide against?",
+    context: { has: ["Postmark starts at $15", "Clerk Pro costs $25"] },
+    answer: { search: false, has: [/Clerk/, /Postmark/, /Redis/, /Plausible/, /Railway/] },
+  },
+  {
+    id: "u2",
+    history: "long",
+    message: "How many separate conversations have we had about CRMs, and on which dates?",
+    context: {},
+    answer: { search: false, has: [/\b(4|four)\b/i, /2 Nov/, /9 Nov/, /10 Nov/] },
+  },
+  {
+    id: "u3",
+    history: "long",
+    message:
+      "If we pick Pipedrive over HubSpot for the whole team, how much more is that per year, at the latest prices you gave me?",
+    context: {},
+    answer: { search: false, has: [/7,200/] },
+  },
+  {
+    id: "u4",
+    history: "long",
+    message:
+      "I'm cooking for my dad's birthday. Remind me when it is, and pick one of the dinners you gave me that I'd actually eat.",
+    context: {},
+    answer: { search: false, has: [/22 Nov/, /vegetarian|mushroom/i] },
+  },
+  {
+    id: "u5",
+    history: "long",
+    message: "On 7 October I chose Cloudflare Workers for the frontend, right?",
+    context: {},
+    answer: { search: false, has: [/Vercel/, /\bno\b|not |didn['’]t|actually/i] },
+  },
+  {
+    id: "u6",
+    history: "long",
+    message: "What did I ask you last weekend, and which of it was about money?",
+    context: {},
+    answer: { search: false, has: [/hike|Pedernales/i, /Vercel/, /meal|dal|batch/i, /backup/i] },
+  },
+  {
+    id: "u7",
+    history: "long",
+    message: "Is Bitwarden Teams still $4 a user? What do we pay a year at our company size?",
+    context: {},
+    answer: { search: true, official: ["bitwarden.com"], has: [/1,920/] },
+  },
+  {
+    id: "u8",
+    history: "long",
+    message:
+      "How long did you say the battery lasts on the headphones I bought, and can I plug them into the plane's screen?",
+    context: {},
+    answer: { search: false, has: [/24 hours/, /18/, /cable|adapter|jack/i] },
+  },
+  {
+    id: "u9",
+    history: "long",
+    message:
+      "List every price that changed between two of our conversations: old and new, with both dates.",
+    context: {},
+    answer: { search: false, has: [/\$19/, /\$5/, /\$34/, /\$39/] },
+  },
+  {
+    id: "u10",
+    history: "long",
+    message: "What was the very first decision I made with you, and the most recent one?",
+    context: {},
+    answer: { search: false, has: [/Adrenaline|Brooks/, /trial|HubSpot/i] },
   },
 ];
