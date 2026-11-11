@@ -55,7 +55,7 @@ const BRIEF_POSTGRES =
   "Last Tuesday I asked you about Postgres hosting. Has any pricing changed since then?";
 
 const NO_RECORD =
-  /no record|don['’]t have (a |any )?record|no (earlier|previous|past|prior) (conversation|chat)|(can['’]t|couldn['’]t|don['’]t) (find|see)/i;
+  /no record|don['’]t have (a |any )?(record|earlier|previous|saved)|no (earlier|previous|past|prior) (conversation|chat)|(can['’]t|couldn['’]t|don['’]t) (find|see)/i;
 const NOV_3 = /\b3 Nov|Nov(ember)? 3\b/i;
 const FIVE_CRMS = [/Freshsales/, /HubSpot/, /Zoho/, /Salesforce/, /Pipedrive/];
 
@@ -436,7 +436,7 @@ export const CASES: EvalCase[] = [
     message: BRIEF_NOV_3,
     // Two chats that day; and Neon's price was already seen to change three days later.
     context: { has: [POSTGRES, MARATHON_PLAN, NEON, SUPABASE, RAILWAY, NEON_NOW] },
-    answer: { official: ["neon.com"], has: [/Postgres/, /marathon/i] },
+    answer: { official: ["neon.com"], has: [/Postgres|Neon/, /marathon/i] },
   },
   {
     id: "n3",
@@ -1039,7 +1039,7 @@ export const CASES: EvalCase[] = [
     history: "long",
     message: "Have I ever asked you about Kubernetes?",
     context: { lacks: ["Kubernetes"] },
-    answer: { search: false, has: [/\bno\b|haven['’]t|not /i] },
+    answer: { search: false, has: [NO_RECORD], lacks: [/can['’]t (confirm|tell|be sure)/i] },
   },
   {
     id: "x13",

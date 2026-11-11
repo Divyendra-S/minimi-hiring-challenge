@@ -122,22 +122,20 @@ Source: Hugging Face, "Agent Memory EXPLAINED – Complete Architecture" (youtub
 
 ### 2.4 Storage driver and Node version
 
-- **Driver: `better-sqlite3`.** It's the standard: 10 years old and about 12.7M downloads/week. Synchronous, fast, FTS5 included. libsql was evaluated (works on Node 20, but bundles an older SQLite 3.45 and has a smaller community) and set aside.
-- **Node usage data:**
-  - about 14% of projects still target Node 20 (`@types/node` downloads)
-  - official Node.js downloads, July 2026: Node 20 103.7M, Node 22 283.9M, Node 24 358.8M
-  - Node 20 has been end-of-life since 2026-04-30
-- **better-sqlite3's prebuilt binaries don't cover Node 20 and 26 in any one version:**
-  - v12.9.1 covers 20–25
-  - v12.10+ covers 22–26
-  - v13 requires Node ≥ 22
-- **v13 needs no install script** (checked 2026-11-11): it ships N-API binaries for 8 platforms inside the package (macOS, Linux glibc and musl, Windows; x64 and arm64). `npm install` never compiles C++, and it keeps working when npm starts blocking install scripts (npm 11.17 already warns about unreviewed ones).
-- **Package requirements set the floor at Node ≥ 22:** better-sqlite3 13 and openai 7 need ≥ 22 (Next.js 16 needs ≥ 20.9).
-- **Handling older Node:**
-  - `"engines": { "node": ">=22" }` plus `.npmrc` `engine-strict=true`
-  - Tested on Node 20: npm stops immediately with a clear `EBADENGINE … Required: >=22` message instead of a confusing C++ compile error.
-  - The README says "Node 22+ (`nvm install 22`)", and `.nvmrc` pins 24.
-- **Consequence:** vitest 5 declares `^22.12 || ^24 || >=26`, so with `engine-strict` it would **break `npm install` on Node 23/25**. We use Node's built-in `node:test` instead: zero dependencies, works on every version.
+- **Driver: `libsql`** (changed on 2026-11-11 from `better-sqlite3`). It is SQLite with better-sqlite3's synchronous API, FTS5 included.
+- **Why the change:** a grader may be on Node 20, and the app must start there.
+  - better-sqlite3 ships one binary per Node version. No single release covers Node 20 and 26: v12.9.1 covers 20–25, v12.10+ covers 22–26, v13 needs ≥ 22 and crashed on Node 20 at the first query (tested).
+  - libsql's binaries are N-API: one per platform, for every Node version.
+- **Tested on Node 20.19 from a clean copy** (2026-11-11): `npm ci` in 5 s, typecheck, 57 unit tests, 113 offline evals, `next build`, then `next dev`: health, demo load and one live chat turn (first word in 1.7 s). The same on Node 24.
+- **What libsql costs:**
+  - It is version 0.5, with a smaller community, and bundles SQLite 3.45 (better-sqlite3 has 3.5x). We use nothing newer.
+  - Its `get()` adds a `_metadata` field to the row, and its types don't type rows. Both are handled in one place, `src/adapters/db.ts`, which exposes only `prepare`, `exec`, `transaction` and `close`.
+  - No binary for Windows on ARM.
+  - Speed is the same for us: a query takes microseconds either way; a turn spends 3 to 5 ms in our code.
+- **The openai package declares Node ≥ 22.** It runs on Node 20 (tested live), but npm prints an `EBADENGINE` warning there. `engine-strict` was removed from `.npmrc` so that the warning doesn't stop the install.
+- **Node floor:** `"engines": { "node": ">=20.9" }`, which is Next.js 16's own minimum. `.nvmrc` pins 24. CI runs Node 20, 22, 24 and 26.
+- **Node usage data:** about 14% of projects still target Node 20 (`@types/node` downloads), though it has been end-of-life since 2026-04-30.
+- **Tests:** vitest 5 declares `^22.12 || ^24 || >=26`, so it would not install cleanly on Node 20, 23 or 25. We use Node's built-in `node:test` instead: zero dependencies, works on every version.
 
 ---
 
@@ -152,7 +150,7 @@ Source: Hugging Face, "Agent Memory EXPLAINED – Complete Architecture" (youtub
 | LLM SDK                   | `openai` npm package with OpenRouter's `baseURL`                         | The most familiar API to reviewers, mature streaming and tool calls, works with any provider                                                                                                                | Proposed    |
 | Models                    | `CHAT_MODEL`, `MEMORY_MODEL` env vars, default `openai/gpt-6-luna`       | Cheap; final default chosen by evals                                                                                                                                                                        | Proposed    |
 | Search                    | Tavily over plain `fetch` (one small module)                             | Full control of timeouts, caching and parameters; no SDK needed                                                                                                                                             | Proposed    |
-| Database                  | `better-sqlite3`, one file `data/agent.db`, FTS5                         | Standard driver, nothing to set up                                                                                                                                                                          | **Decided** |
+| Database                  | `libsql` (SQLite), one file `data/agent.db`, FTS5                        | Standard driver, nothing to set up                                                                                                                                                                          | **Decided** |
 | Node                      | ≥ 22, `engine-strict`, `.nvmrc` = 24                                     | §2.4                                                                                                                                                                                                        | **Decided** |
 | Streaming format          | NDJSON over `fetch` (one JSON event per line)                            | `EventSource` can't POST, so SSE framing adds parsing with no benefit                                                                                                                                       | Proposed    |
 | Validation                | `zod` at the edges (env, request bodies, tool inputs, extraction output) | Fail fast with clear errors                                                                                                                                                                                 | Proposed    |
@@ -192,7 +190,7 @@ Rule: each layer only calls the layer below it. Core never imports Next.js or Re
 
 **Next.js specifics:**
 
-- Route handlers run on the Node runtime by default. better-sqlite3 is on Next's built-in list of server packages, so it needs no config (tested).
+- Route handlers run on the Node runtime by default. libsql is on Next's built-in list of server packages, so it needs no config (tested).
 - The database connection is cached on `globalThis` in dev, so editing files doesn't reopen it on every reload.
 - Background memory extraction is scheduled with `after()` from `next/server`, which runs once the response has been sent (tested).
 - No server components for loading data. The page is one client component, and all data comes through the API + TanStack Query: one pattern that's easy to follow.
@@ -426,7 +424,7 @@ Defined once in `src/shared/events.ts` and imported by both server and client. `
 - Validation and error handling at the edges (routes, adapters). Core trusts its inputs.
 - Comments explain _why_, not _what_. No dead code, no commented-out code.
 - Dependency budget, about 15 packages in total:
-  - runtime: next, react, react-dom, better-sqlite3, openai, zod, chrono-node, @tanstack/react-query, react-markdown, remark-gfm
+  - runtime: next, react, react-dom, libsql, openai, zod, chrono-node, @tanstack/react-query, react-markdown, remark-gfm
   - dev: typescript, tailwindcss, @tailwindcss/postcss, tsx (scripts and tests), @biomejs/biome, @types/*
 - Small commits that tell the story (scaffold → chat → search → memory → evals → docs).
 
@@ -585,16 +583,16 @@ Each phase ends in a working app: typecheck, lint, tests and build pass, then a 
 
 ## 9. Risks
 
-| Risk                                                    | Mitigation                                                                                                            |
-| ------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------- |
-| Luna's answer quality isn't good enough                 | Model is an env var; evals decide; Sol is the fallback                                                                |
-| Extraction invents or garbles facts                     | Schema-validated output; extract only from the turn; claims need a cited source; memories can be rebuilt from the log |
-| Wrong dates (timezone, "last Tuesday")                  | Timezone from the browser; fixed-clock unit tests; check both candidate dates and say which was used                  |
-| Prompt injection from web pages                         | Results passed as data; explicit system rule; no tool besides search                                                  |
-| Tavily free quota                                       | Cache; small eval set; key is user-supplied                                                                           |
-| Reviewer on Node < 22                                   | `engine-strict` gives a clear message; README states the version; `.nvmrc`                                            |
-| better-sqlite3 has no prebuilt binary for some platform | CI matrix catches it; the store lives in one module, so swapping in libsql is a one-file change                       |
-| Context grows over long chats                           | Last 20 messages + memory block instead of the full history                                                           |
+| Risk                                                                  | Mitigation                                                                                                                                |
+| --------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------- |
+| Luna's answer quality isn't good enough                               | Model is an env var; evals decide; Sol is the fallback                                                                                    |
+| Extraction invents or garbles facts                                   | Schema-validated output; extract only from the turn; claims need a cited source; memories can be rebuilt from the log                     |
+| Wrong dates (timezone, "last Tuesday")                                | Timezone from the browser; fixed-clock unit tests; check both candidate dates and say which was used                                      |
+| Prompt injection from web pages                                       | Results passed as data; explicit system rule; no tool besides search                                                                      |
+| Tavily free quota                                                     | Cache; small eval set; key is user-supplied                                                                                               |
+| Reviewer on Node 20                                                   | libsql runs on every Node version; tested from a clean copy on Node 20.19; CI runs Node 20 to 26                                          |
+| libsql has no prebuilt binary for some platform (e.g. Windows on ARM) | CI matrix covers macOS, Linux and Windows x64; the driver lives in one module (`src/adapters/db.ts`), so swapping it is a one-file change |
+| Context grows over long chats                                         | Last 20 messages + memory block instead of the full history                                                                               |
 
 ---
 

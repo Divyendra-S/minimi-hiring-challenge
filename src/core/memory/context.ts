@@ -130,7 +130,10 @@ function bestFit(message: string, days: { range: DayRange; messages: LoggedMessa
 function conversationsOn(range: DayRange, messages: LoggedMessage[], timeZone: string): string {
   const heading = `Conversations on ${range.label}, apart from this one`;
   if (messages.length === 0) return `${heading}: none.`;
-  const bySession = Map.groupBy(messages, (message) => message.sessionId);
+  const bySession = new Map<string, LoggedMessage[]>();
+  for (const message of messages) {
+    bySession.set(message.sessionId, [...(bySession.get(message.sessionId) ?? []), message]);
+  }
   const blocks = [...bySession.values()].map((session) => {
     const lines = session.map((m) => {
       const time = formatTime(m.createdAt, timeZone);
@@ -197,8 +200,12 @@ function sessionsSection(store: Store, input: ContextInput): string {
   const lines = sessions.map((s) => `- ${day(s.updatedAt)}: ${s.title}`);
   const { count, first } = store.sessionStats(input.userId);
   if (first && count > RECENT_SESSIONS + 1) {
+    // Seen live: asked "have I ever asked about X?", the model answered "I can't tell, the list
+    // is not complete". The memories are searched over everything, so it can tell.
     lines.push(
       `There are ${count} conversations in all. The first was on ${day(first.createdAt)}: ${first.title}`,
+      "The saved memories were searched across all of them, not only the ones listed: if nothing " +
+        "about a topic is shown, there is no record of it.",
     );
   }
   return ["Recent conversations, by last message (newest first):", ...lines].join("\n");

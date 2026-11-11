@@ -286,3 +286,22 @@ a date, sums on remembered numbers, recall plus a fresh check, follow-ups).
 line after the search results, and the every-step rule) came after the 21-case regression and
 were rerun only on the brief's two questions they concern. Answers vary from run to run: a pass
 is one good answer, not a guarantee.
+
+## 11. Rerun after the move to libsql (11 Nov 2026)
+
+The whole live set again, on the new database driver: the 20 vague cases and the brief's three
+on Node 24, the 16 hard cases on Node 20.
+
+|                       | Result                 | Time to first word                                 |
+| --------------------- | ---------------------- | -------------------------------------------------- |
+| Vague (20)            | 20 of 20               | no search 1.3 to 2.1 s; with search 3.9 to 4.9 s   |
+| Hard (16), on Node 20 | 16 of 16 after one fix | no search 1.2 to 1.7 s; with search 3.4 to 4.2 s   |
+| The brief's three     | 3 of 3                 | CRM 5.5 s, 3 November 3.8 to 4.4 s, Postgres 4.4 s |
+
+- One real fault, fixed: asked "Have I ever asked you about Kubernetes?", the model said it
+  could not tell because the list of conversations is not complete. The context now says that
+  the memories were searched across every conversation. 4 runs in 4 after the change.
+- Two failures were the checks': a correct answer said "side-project database" where the check
+  wanted "Postgres", and "I don't have any earlier conversation" was not on the list of ways
+  to say "no record". Both checks were widened.
+- The driver changed nothing in the answers or the timings: our own code takes 4 to 6 ms a turn.

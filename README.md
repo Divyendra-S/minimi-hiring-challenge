@@ -2,9 +2,11 @@
 
 A chat agent with one tool, web search, that remembers past conversations.
 
+How it works and why: [DESIGN.md](DESIGN.md).
+
 ## Run it
 
-Needs Node 22 or newer (`nvm use` picks the version in `.nvmrc`).
+Needs Node 20.9 or newer (`nvm use` picks the version in `.nvmrc`).
 
 ```bash
 npm install
