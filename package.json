@@ -13,7 +13,7 @@
     "typecheck": "next typegen && tsc --noEmit",
     "lint": "biome check .",
     "format": "biome check --write .",
-    "test": "node --import tsx --test test/*.test.ts",
+    "test": "node scripts/test.mjs",
     "eval": "tsx evals/run.ts",
     "reindex": "tsx scripts/reindex.ts"
   },
