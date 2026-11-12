@@ -1,8 +1,22 @@
 # Search Agent
 
-A chat agent with one tool, web search, that remembers past conversations.
+A chat agent with one tool, web search, and a memory of every past conversation. Ask it what you
+asked last Tuesday, and whether the answer still holds today.
 
-How it works and why: [DESIGN.md](DESIGN.md).
+![Architecture: the user's question goes through hybrid recall over SQLite and a re-check of sources in code, then to the model with the lists about the user; after the answer streams, memories are extracted into SQLite](docs/architecture.png)
+
+## How it works
+
+1. **Store.** One SQLite file holds the log of every chat, what is known about the user
+   (decisions, facts, preferences), and claims: prices and versions, each with its source page.
+2. **Find.** Five searches run in code on each message (keyword, meaning, entity, one hop along
+   entity links, date) and are merged by reciprocal rank fusion. No model call.
+3. **Decide.** Before the model runs, code marks which value is current and, when asked whether
+   something still holds, fetches the source pages again.
+4. **Answer.** The model compares, searches the web if it needs to, and streams the reply.
+5. **Remember.** After the reply, one model call extracts new memories.
+
+The reasons, the results and what was rejected are in [DESIGN.md](DESIGN.md).
 
 ## Run it
 
@@ -15,7 +29,15 @@ npm run dev            # http://localhost:3000
 ```
 
 To try recall without waiting a week, click **Load demo history** in the sidebar: it adds 47 past
-chats, dated over the last eight weeks, with no API call.
+chats, dated over the last eight weeks, with no API call. Then try:
+
+- "On Monday we shortlisted 5 CRM tools for a 20-person sales team. Has any of them changed
+  pricing or shipped something big since?"
+- "Last Tuesday I asked you about Postgres hosting. Has any pricing changed since then?"
+- "What did I ask you last Tuesday? Is your answer still correct today?"
+
+The demo chats are dated back from today, so weekdays stay right whenever you load them. A fixed
+date such as "3 November" matches only if a chat falls on that day.
 
 ## Import your own chats
 
